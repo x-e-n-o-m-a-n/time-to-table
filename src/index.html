@@ -1,0 +1,607 @@
+<!-- Этот файл является частью time-to-table -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost"
+    />
+    <meta http-equiv="X-XSS-Protection" content="1; mode=block" />
+    <meta
+      http-equiv="Strict-Transport-Security"
+      content="max-age=63072000; includeSubDomains; preload"
+    />
+    <title>Time-To-Table v0.6.9 (Калькулятор для ленивых)</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="card">
+      <div class="header-row">
+        <h2>
+          Калькулятор для ленивых
+          <span>v0.6.9 (C) Галимзянов Г.Р.</span>
+        </h2>
+        <div class="btn-group-row">
+          <button class="btn-sm" id="aboutBtn">О Программе</button>
+          <button class="btn-sm" id="clearBtn">Очистить (F5)</button>
+          <button class="btn-sm btn-danger" id="resetBtn">Сброс</button>
+          <button class="btn-sm btn-settings" id="settingsBtn">
+            Настройки
+          </button>
+          <button class="btn-sm" id="importBtn">Импорт (JSON)</button>
+          <button class="btn-sm" id="exportBtn">Экспорт (JSON)</button>
+          <input type="file" id="fileInput" accept=".json" />
+        </div>
+      </div>
+
+      <div class="setup-grid">
+        <div class="input-group">
+          <label for="techCardSelect">Техкарта (Шаблон)</label>
+          <div>
+            <select id="techCardSelect" class="hidden-select">
+              <option value="manual">-- Ручной ввод --</option>
+              <optgroup label="Сохраненные" id="userCards"></optgroup>
+            </select>
+            <div class="tc-dropdown" id="tcDropdown">
+              <input
+                type="text"
+                class="tc-dropdown-input"
+                id="tcSearchInput"
+                placeholder="🔍 Поиск техкарты..."
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <div class="tc-dropdown-list" id="tcDropdownList"></div>
+            </div>
+            <button
+              class="btn-sm card-action-btn"
+              id="saveCardBtn"
+              title="Сохранить Техкарту"
+              aria-label="Сохранить Техкарту"
+            >
+              💾
+            </button>
+            <button
+              class="btn-sm card-action-btn"
+              id="deleteCardBtn"
+              title="Удалить Техкарту"
+              aria-label="Удалить Техкарту"
+            >
+              ✖
+            </button>
+            <button
+              class="btn-sm card-action-btn"
+              id="analyzeCardBtn"
+              title="Синтаксический Анализ"
+              aria-label="Синтаксический Анализ"
+            >
+              🔎
+            </button>
+          </div>
+        </div>
+        <div class="input-group">
+          <label for="postingDate">Дата проводки</label
+          ><input type="date" id="postingDate" />
+        </div>
+        <div class="input-group">
+          <label for="startDate">Дата Начала</label
+          ><input type="date" id="startDate" />
+        </div>
+        <div class="input-group">
+          <label for="startTime">Время Начала</label
+          ><input type="time" id="startTime" step="1" value="08:00:00" />
+        </div>
+
+        <div class="input-group">
+          <fieldset class="mode-fieldset">
+            <legend class="mode-legend">Режим</legend>
+            <div class="checkbox-group">
+              <input type="checkbox" id="chainMode" checked />
+              <label for="chainMode">Цепочка</label>
+            </div>
+          </fieldset>
+        </div>
+
+        <div class="input-group">
+          <label for="lunchStart">Обед 1 (12:00)</label>
+          <input type="time" id="lunchStart" value="12:00" />
+        </div>
+        <div class="input-group">
+          <label for="lunchStart2">Обед 2 (00:00)</label>
+          <input type="time" id="lunchStart2" value="00:00" />
+        </div>
+        <div class="input-group">
+          <label for="lunchDur">Обед (мин)</label>
+          <input
+            type="text"
+            id="lunchDur"
+            class="op-break-val"
+            inputmode="decimal"
+            pattern="\\d{0,5}([.,]\\d{1,2})?"
+            maxlength="8"
+            value="45"
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="input-group">
+          <label for="totalOps">Кол-во операций</label>
+          <div class="worker-split-row">
+            <input
+              type="number"
+              id="totalOps"
+              min="1"
+              max="20"
+              step="1"
+              value="1"
+              inputmode="numeric"
+            />
+            <button
+              class="btn-sm"
+              id="setOpsBtn"
+              title="Задать Номер Подтверждения"
+              aria-label="Задать Номер Подтверждения"
+            >
+              ЗАДАТЬ
+            </button>
+          </div>
+        </div>
+        <div class="input-group">
+          <label for="workerCount">Исполнителей</label>
+          <div class="worker-split-row">
+            <input
+              type="number"
+              id="workerCount"
+              min="1"
+              max="10"
+              step="1"
+              value="1"
+              inputmode="numeric"
+            />
+            <button
+              class="btn-sm"
+              id="setWorkersBtn"
+              title="Задать Номер Исполнителя"
+              aria-label="Задать Номер Исполнителя"
+            >
+              ЗАДАТЬ
+            </button>
+          </div>
+        </div>
+
+        <div class="input-group">
+          <label for="timeMode">Тип задания</label>
+          <select id="timeMode">
+            <option value="per_worker">На каждого</option>
+            <option value="total" selected>Общее</option>
+            <option value="individual">Индивидуально</option>
+          </select>
+        </div>
+
+        <div class="input-group">
+          <label for="orderName">Заказ</label
+          ><input
+            type="text"
+            id="orderName"
+            placeholder="Номер заказа"
+            maxlength="12"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            autocomplete="on"
+          />
+        </div>
+        <div class="input-group">
+          <label for="itemName">Наименование</label
+          ><input
+            type="text"
+            id="itemName"
+            placeholder="Наименование"
+            maxlength="70"
+          />
+        </div>
+        <div class="input-group">
+          <label for="resIz">Rиз (Мом)</label
+          ><input
+            type="text"
+            id="resIz"
+            placeholder="..."
+            maxlength="6"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            autocomplete="off"
+          />
+        </div>
+        <div class="input-group">
+          <label for="coefK">Коэф. K</label
+          ><input
+            type="text"
+            id="coefK"
+            placeholder="..."
+            maxlength="5"
+            inputmode="decimal"
+            pattern="[0-9]+([.,][0-9]{1,2})?"
+            autocomplete="off"
+          />
+        </div>
+      </div>
+
+      <div class="text-fields-row">
+        <div class="input-group">
+          <label for="statusBefore">Состояние до ремонта (п.1)</label>
+          <input
+            type="text"
+            id="statusBefore"
+            value="замечаний нет"
+            maxlength="300"
+          />
+          <div class="char-counter" id="statusBefore_counter">300</div>
+        </div>
+        <div class="input-group">
+          <label for="workExtra">Доп. работы (п.3)</label>
+          <input type="text" id="workExtra" value="нет" maxlength="300" />
+          <div class="char-counter" id="workExtra_counter">300</div>
+        </div>
+        <div class="input-group">
+          <label for="devRec">Рекомендации (п.5)</label>
+          <input type="text" id="devRec" value="нет" maxlength="300" />
+          <div class="char-counter" id="devRec_counter">300</div>
+        </div>
+      </div>
+
+      <div class="input-group ops-sort-row">
+        <label for="opsSortMode" class="ops-sort-label">Считать:</label>
+        <select id="opsSortMode" class="ops-sort-select">
+          <option value="sequential">По Порядковому Номеру</option>
+          <option value="confirmation">По Номеру Подтверждения</option>
+        </select>
+      </div>
+
+      <br />
+      <br />
+
+      <div id="fieldsContainer"></div>
+      <button class="btn-main" id="generateBtn">
+        Сформировать таблицу и сообщение
+      </button>
+    </div>
+
+    <div id="tableResult" class="tables-container"></div>
+    <div id="z7Result" class="tables-container"></div>
+
+    <div class="history-section" id="historyBlock">
+      <div class="history-controls">
+        <div class="history-controls-top">
+          <h3>История расчетов</h3>
+          <div class="session-controls">
+            <select id="sessionSelect" title="Выбор сессии"></select>
+            <button
+              class="btn-sm btn-session"
+              id="newSessionBtn"
+              title="Новая сессия"
+            >
+              +
+            </button>
+            <button
+              class="btn-sm btn-session"
+              id="renameSessionBtn"
+              title="Переименовать сессию"
+            >
+              ✏️
+            </button>
+            <button
+              class="btn-sm btn-session btn-session-del"
+              id="deleteSessionBtn"
+              title="Удалить сессию"
+            >
+              🗑️
+            </button>
+          </div>
+        </div>
+        <div class="history-actions">
+          <button class="btn-sm" id="clearHistoryBtn">Очистить историю</button>
+          <div class="export-wrapper">
+            <button class="btn-sm" id="exportExcelBtn">
+              Скачать историю (.xlsx)
+            </button>
+          </div>
+        </div>
+      </div>
+      <div id="historyList"></div>
+    </div>
+
+    <!-- Модальное окно задания номеров подтверждения операций -->
+    <div id="opsModal" class="modal-overlay">
+      <div class="modal-content modal-content-wide">
+        <div class="modal-header">
+          <h2>Номера Подтверждения Операций</h2>
+          <button class="modal-close" id="closeOpsModal">&times;</button>
+        </div>
+        <div class="modal-body" id="opsModalBody">
+          <p class="workers-hint">
+            Введите номер ПДТВ для операций. В режиме "авто" последующие номера будут рассчитаны автоматически (+1).<br />
+            "ПОСЛЕДНЯЯ" и "ПРЕДПОСЛЕДНЯЯ" означает, что операции будет присвоен соответствующий номер ПДТВ.<br />
+            Удобно при наличии до ДВУХ подопераций в заказе. Если подопераций БОЛЬШЕ - вводите номера самостоятельно.
+          </p>
+          <div id="opsInputList"></div>
+          <div class="workers-actions">
+            <button class="btn-sm btn-save" id="saveOpsBtn">Сохранить</button>
+            <button class="btn-sm btn-reset" id="resetOpsBtn">Сбросить</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Модальное окно задания номеров исполнителей -->
+    <div id="workersModal" class="modal-overlay">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Номера Исполнителей</h2>
+          <button class="modal-close" id="closeWorkersModal">&times;</button>
+        </div>
+        <div class="modal-body" id="workersModalBody">
+          <div class="workers-modal-flex">
+            <div class="workers-modal-left">
+              <p class="workers-hint">
+                Введите 8-значный номер для каждого исполнителя.<br />
+                Оставьте пустым для использования порядкового номера.
+              </p>
+              <div id="workersInputList"></div>
+            </div>
+            <div class="workers-modal-right">
+              <div class="workers-cheat-container">
+                <p class="workers-cheat-sub">
+                  Свободное поле для заметок.<br />
+                  Текст сохраняется локально.<br />
+                  НЕ экспортируется в JSON.
+                </p>
+                <textarea
+                  id="workersCheat"
+                  class="workers-cheat-textarea"
+                  placeholder="Введите заметки, инструкции, номера..."
+                  maxlength="5000"
+                ></textarea>
+              </div>
+            </div>
+          </div>
+          <div class="workers-actions workers-actions--compact">
+            <div class="workers-actions-left">
+              <button class="btn-sm btn-save" id="saveWorkersBtn">
+                Сохранить
+              </button>
+              <button class="btn-sm btn-reset" id="resetWorkersBtn">
+                Сбросить
+              </button>
+            </div>
+            <div class="workers-actions-right">
+              <button class="btn-sm btn-edit" id="editWorkersBtn">
+                Изменить
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Модальное окно "Синтаксический Анализ" -->
+    <div id="analyzeModal" class="modal-overlay">
+      <div class="modal-content analyze-modal-content">
+        <div class="modal-header">
+          <h2>Синтаксический Анализ</h2>
+          <button class="modal-close" id="closeAnalyzeModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="analyze-form">
+            <div class="analyze-field">
+              <label for="analyzeCardName">Название тех карты</label>
+              <input
+                type="text"
+                id="analyzeCardName"
+                placeholder="Вставьте название техкарты(до 100 символов)"
+                maxlength="100"
+                autocomplete="off"
+              />
+            </div>
+            <div class="analyze-field">
+              <label for="analyzeOpsText">Операции / Длительность</label>
+              <textarea
+                id="analyzeOpsText"
+                rows="10"
+                placeholder="Вставьте название операции(до 200 символов) и длительность(до 5 цифр в целой части и до 2 цифр в дробной) в формате:&#10;&#10;Название  (цифра которая будет отброшена) Длительность&#10;&#10;Пример:&#10;Операция 1 (любое число) 111,1&#10;Операция 2 (любое число) 55555.22&#10;Операция 3 (любое число) 20000"
+                maxlength="5000"
+              ></textarea>
+              <span class="analyze-hint"
+                >Допустимые символы: лат/кириллица, цифры, слэш, дефис, запятая, точка, символ № и пробел.&#10;Прочие будут отброшены.&#10;Множитель применяется к длительности операции.</span
+              >
+            </div>
+            <div class="analyze-field analyze-field-row">
+              <label for="analyzeUnit">Единица времени</label>
+              <select id="analyzeUnit">
+                <option value="min" selected>Мин</option>
+                <option value="hour">Час</option>
+              </select>
+              <label for="analyzeMultiplier" class="analyze-multiplier-label"
+                >Множитель</label
+              >
+              <select id="analyzeMultiplier">
+                <option value="1" selected>1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="7">7</option>
+                <option value="8">8</option>
+                <option value="9">9</option>
+                <option value="10">10</option>
+              </select>
+            </div>
+            <div class="analyze-actions">
+              <button class="btn-sm btn-save" id="analyzeModalSaveBtn">
+                Сохранить
+              </button>
+              <button class="btn-sm btn-reset" id="analyzeModalCancelBtn">
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Модальное окно "Настройки" -->
+    <div id="settingsModal" class="modal-overlay">
+      <div class="modal-content settings-modal-content">
+        <div class="modal-header">
+          <h2>Настройки По Умолчанию</h2>
+          <button class="modal-close" id="closeSettingsModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="settings-hint">
+            Значения ниже будут применяться при <b>Сбросе</b> и
+            <b>Очистке (F5)</b> вместо встроенных.<br />Настройки хранятся
+            локально и не экспортируются в JSON.
+          </p>
+          <div class="settings-form">
+            <div class="settings-field settings-field-row">
+              <label for="defTheme">Тема</label>
+              <select id="defTheme">
+                <option value="light" selected>Светлая</option>
+                <option value="dark">Тёмная</option>
+              </select>
+            </div>
+            <div class="settings-field settings-field-row">
+              <label for="defChainMode">Режим — Цепочка</label>
+              <input type="checkbox" id="defChainMode" checked />
+            </div>
+            <div class="settings-field settings-field-row">
+              <label for="defTimeMode">Тип задания</label>
+              <select id="defTimeMode">
+                <option value="per_worker">На каждого</option>
+                <option value="total" selected>Общее</option>
+                <option value="individual">Индивидуально</option>
+              </select>
+            </div>
+            <div class="settings-field">
+              <label for="defStatusBefore">Состояние до ремонта (п.1)</label>
+              <input
+                type="text"
+                id="defStatusBefore"
+                value="замечаний нет"
+                maxlength="300"
+                autocomplete="off"
+              />
+            </div>
+            <div class="settings-field">
+              <label for="defWorkExtra">Доп. работы (п.3)</label>
+              <input
+                type="text"
+                id="defWorkExtra"
+                value="нет"
+                maxlength="300"
+                autocomplete="off"
+              />
+            </div>
+            <div class="settings-field">
+              <label for="defDevRec">Рекомендации (п.5)</label>
+              <input
+                type="text"
+                id="defDevRec"
+                value="нет"
+                maxlength="300"
+                autocomplete="off"
+              />
+            </div>
+            <div class="settings-field settings-field-row">
+              <label for="defSortMode">Считать</label>
+              <select id="defSortMode">
+                <option value="sequential" selected>
+                  По Порядковому Номеру
+                </option>
+                <option value="confirmation">По Номеру Подтверждения</option>
+              </select>
+            </div>
+            <div class="settings-section-title">Цветовая палитра Excel</div>
+            <div class="settings-colors-grid">
+              <label for="defColorLocked">Заблокированные Ячейки</label>
+              <input type="color" id="defColorLocked" value="#F7A1A1" />
+              <span class="color-text-preview" id="previewLocked"></span>
+              <label for="defColorPdtv">Редактирование НЕ Желательно</label>
+              <input type="color" id="defColorPdtv" value="#FFF9C4" />
+              <span class="color-text-preview" id="previewPdtv"></span>
+              <label for="defColorEditable">Редактируемые Ячейки</label>
+              <input type="color" id="defColorEditable" value="#FFFFFF" />
+              <span class="color-text-preview" id="previewEditable"></span>
+              <label for="defColorHeader">Заголовки таблиц</label>
+              <input type="color" id="defColorHeader" value="#1A8A8A" />
+              <span class="color-text-preview" id="previewHeader"></span>
+              <label for="defColorConfirmed">При Выборе Подтверждено</label>
+              <input type="color" id="defColorConfirmed" value="#D5F5D5" />
+              <span class="color-text-preview" id="previewConfirmed"></span>
+              <label for="defColorAuthor">Строка настроек(Шапка)</label>
+              <input type="color" id="defColorAuthor" value="#EDF7ED" />
+              <span class="color-text-preview" id="previewAuthor"></span>
+            </div>
+            <div class="settings-actions">
+              <button class="btn-sm btn-save" id="settingsSaveBtn">
+                Сохранить
+              </button>
+              <button class="btn-sm btn-reset" id="settingsResetBtn">
+                Сбросить к встроенным
+              </button>
+              <button class="btn-sm btn-cancel" id="settingsCancelBtn">
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Модальное окно "Конфликт при импорте" -->
+    <div id="importConflictModal" class="modal-overlay">
+      <div class="modal-content import-conflict-modal-content">
+        <div class="modal-header">
+          <h2>Конфликт при импорте</h2>
+          <button class="modal-close" id="closeImportConflictModal">
+            &times;
+          </button>
+        </div>
+        <div class="modal-body">
+          <p id="importConflictText"></p>
+          <div class="import-conflict-actions">
+            <button class="btn-sm btn-save" id="importConflictOverwriteBtn">
+              Перезаписать все
+            </button>
+            <button class="btn-sm btn-new-only" id="importConflictNewOnlyBtn">
+              Только новые
+            </button>
+            <button class="btn-sm btn-cancel" id="importConflictCancelBtn">
+              Отмена
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Модальное окно "О программе" -->
+    <div id="aboutModal" class="modal-overlay">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>О Программе</h2>
+          <button class="modal-close" id="closeAboutModal">&times;</button>
+        </div>
+        <div class="modal-body" id="aboutModalBody">
+          <p>Загрузка...</p>
+        </div>
+      </div>
+    </div>
+
+    <script src="libs/exceljs.min.js"></script>
+    <script src="main.js"></script>
+  </body>
+</html>
