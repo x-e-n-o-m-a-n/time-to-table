@@ -537,7 +537,7 @@
               <input type="color" id="defColorEditable" value="#FFFFFF" />
               <span class="color-text-preview" id="previewEditable"></span>
               <label for="defColorHeader">Заголовки таблиц</label>
-              <input type="color" id="defColorHeader" value="#1A8A8A" />
+              <input type="color" id="defColorHeader" value="#b98109" />
               <span class="color-text-preview" id="previewHeader"></span>
               <label for="defColorConfirmed">При Выборе Подтверждено</label>
               <input type="color" id="defColorConfirmed" value="#D5F5D5" />
@@ -595,7 +595,22 @@
           <h2>О Программе</h2>
           <button class="modal-close" id="closeAboutModal">&times;</button>
         </div>
+        <div class="about-tabs">
+          <button class="about-tab about-tab--active" id="aboutTabAbout">Описание</button>
+          <button class="about-tab" id="aboutTabHelp">Как Пользоваться</button>
+          <button class="about-tab" id="aboutTabLicense">License</button>
+          <button class="about-tab" id="aboutTabLicenseRu">Лицензия</button>
+        </div>
         <div class="modal-body" id="aboutModalBody">
+          <p>Загрузка...</p>
+        </div>
+        <div class="modal-body" id="aboutHelpBody" style="display:none">
+          <p>Загрузка...</p>
+        </div>
+        <div class="modal-body" id="aboutLicenseBody" style="display:none">
+          <p>Загрузка...</p>
+        </div>
+        <div class="modal-body" id="aboutLicenseRuBody" style="display:none">
           <p>Загрузка...</p>
         </div>
       </div>

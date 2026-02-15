@@ -289,7 +289,7 @@ function _builtinDefaults() {
         excelColors: {
             locked:    '#F7A1A1', // Заблокированные ячейки
             editable:  '#FFFFFF', // Редактируемые ячейки
-            header:    '#1A8A8A', // Заголовки таблиц
+            header:    '#b98109', // Заголовки таблиц
             author:    '#EDF7ED', // Строка настроек/автора
             confirmed: '#D5F5D5', // Статус «Подтверждено»
             pdtv:      '#FFF9C4'  // ПДТВ (авто-формула)
@@ -409,7 +409,7 @@ function unlockFormControls() {
     ids.forEach(({ id, cls }) => {
         try {
             const el = document.getElementById(id);
-            if (el) { el.disabled = false; el.classList.remove(cls); }
+            if (el) { el.disabled = false; el.classList.remove(cls); el.title = ''; }
         } catch (e) {}
     });
     // Разблокировка поля поиска кастомного dropdown
@@ -2272,8 +2272,8 @@ async function exportToExcel() {
     const lunch2H = lunchData?.h2 ?? 0, lunch2M = lunchData?.m2 ?? 0;
     const lunch2Val = lunchData ? `${String(lunch2H).padStart(2, '0')}:${String(lunch2M).padStart(2, '0')}` : '00:00';
     const lunchDurVal = lunchData?.dur ?? 0;
-    const lunch2Text = (lunch2H === 0 && lunch2M === 0) ? 'не учитывается' : lunch2Val;
-    const settingsText = `Режим: ${isChainGlobal ? 'Цепочка' : 'НЕ Цепочка'}  |  Обед 1: ${lunch1Val}  |  Обед 2: ${lunch2Text}  |  Обед(мин): ${lunchDurVal}  |  Записей: ${entries.length}`;
+    const lunch2Text = (lunch2H === 0 && lunch2M === 0) ? 'НЕ Учитывается' : lunch2Val;
+    const settingsText = `Режим Формирования: ${isChainGlobal ? 'Цепочка' : 'НЕ Цепочка'}  |  Обед 1: ${lunch1Val}  |  Обед 2: ${lunch2Text}  |  Обед(мин): ${lunchDurVal}  |  Записей: ${entries.length}`;
 
     const settingsRow = ws.addRow([]);
     sheetRow++;
@@ -2329,7 +2329,8 @@ async function exportToExcel() {
         // --- Строка заголовка ---
         ws.addRow([]);
         sheetRow++;
-        const modeStr = data.timeMode === 'per_worker' ? 'на каждого' : data.timeMode === 'individual' ? 'индивидуальный' : 'общий';
+        const modeStr = data.timeMode === 'per_worker' ? 'На Каждого' : data.timeMode === 'individual' ? 'Индивидуальный' : 'Общий';
+        const pdtvModeStr = data.rows?.[0]?.pdtvAutoMode === true ? 'Авто' : 'НЕ Авто';
         const headerRowNum = sheetRow;
 
         // B:C — выпадающий список подтверждения
@@ -2350,7 +2351,7 @@ async function exportToExcel() {
         // D:V — текст заголовка записи
         ws.mergeCells(`D${headerRowNum}:V${headerRowNum}`);
         const titleCell = ws.getCell(`D${headerRowNum}`);
-        titleCell.value = excelSanitizeCell(data.title) + ' | Режим: ' + modeStr;
+        titleCell.value = excelSanitizeCell(data.title) + ' | Режим Времени: ' + modeStr + ' | Режим ПДТВ: ' + pdtvModeStr;
         titleCell.font = FONT_HEADER;
         titleCell.fill = FILL_HEADER;
         titleCell.alignment = ALIGN_CENTER;
@@ -2394,6 +2395,8 @@ async function exportToExcel() {
         // Якорная строка ПДТВ для текущей записи (используется для Excel-формул в авто-режиме)
         let entryBaseGRow = null;
         let entryBaseOffset = 0;
+        // Строка первого исполнителя каждой операции (для формул ручного режима)
+        const opFirstWorkerGRow = {};
 
         rowsForExport.forEach((r, idx) => {
             const pauseVal = typeof r.pauseExcelVal === 'number' ? r.pauseExcelVal : 0;
@@ -2559,10 +2562,17 @@ async function exportToExcel() {
             let pdtvCellValue, pdtvCellStyle;
             const isAutoPdtv = r.pdtvAutoMode === true;
             if (!isAutoPdtv) {
-                // Ручной режим или старые записи без метаданных — статическое редактируемое значение
-                const opIdxNum = Number(String(r.opIdx ?? '').replaceAll("'", ""));
-                pdtvCellValue = Number.isFinite(opIdxNum) ? opIdxNum : String(r.opIdx ?? '');
-                pdtvCellStyle = styles.pdtvEditable;
+                if (isFirstWorkerOfOp) {
+                    // Первый исполнитель операции — якорная ячейка с числовым значением
+                    const opIdxNum = Number(String(r.opIdx ?? '').replaceAll("'", ""));
+                    pdtvCellValue = Number.isFinite(opIdxNum) ? opIdxNum : String(r.opIdx ?? '');
+                    pdtvCellStyle = styles.pdtvEditable;
+                    opFirstWorkerGRow[curOpNum] = curRow;
+                } else {
+                    // Последующие исполнители — ссылка на первую запись ПДТВ этой операции
+                    pdtvCellValue = { formula: `G${opFirstWorkerGRow[curOpNum]}` };
+                    pdtvCellStyle = styles.pdtvFormula;
+                }
             } else {
                 const currentOffset = typeof r.pdtvOffset === 'number' ? r.pdtvOffset : 0;
                 if (entryBaseGRow === null) {
@@ -3924,30 +3934,64 @@ updateLunch2Label();
 
 
 // === МОДАЛЬНОЕ ОКНО "О ПРОГРАММЕ" ===
-let aboutTextCache = null;
 
-async function loadAboutText() {
-    if (aboutTextCache) return aboutTextCache;
+const aboutTabConfig = [
+    { tab: 'about',      btnId: 'aboutTabAbout',      bodyId: 'aboutModalBody',    file: 'about.md',        errMsg: 'Ошибка загрузки информации о программе.' },
+    { tab: 'help',       btnId: 'aboutTabHelp',       bodyId: 'aboutHelpBody',     file: 'instruction.md',  errMsg: 'Ошибка загрузки инструкции.' },
+    { tab: 'license',    btnId: 'aboutTabLicense',    bodyId: 'aboutLicenseBody',  file: 'license.md',       errMsg: 'Ошибка загрузки лицензии.' },
+    { tab: 'licenseRu',  btnId: 'aboutTabLicenseRu',  bodyId: 'aboutLicenseRuBody', file: 'license(ru).md',  errMsg: 'Ошибка загрузки лицензии (рус).' },
+];
+const aboutTabCache = {};
+
+async function loadAboutTabText(cfg) {
+    if (aboutTabCache[cfg.tab]) return aboutTabCache[cfg.tab];
     try {
-        const response = await fetch('about.txt');
-        if (!response.ok) throw new Error('Failed to load about.txt');
-        aboutTextCache = await response.text();
-        return aboutTextCache;
+        const response = await fetch(cfg.file);
+        if (!response.ok) throw new Error(`Failed to load ${cfg.file}`);
+        aboutTabCache[cfg.tab] = await response.text();
+        return aboutTabCache[cfg.tab];
     } catch (e) {
-        console.error('Error loading about text:', e);
-        return 'Ошибка загрузки информации о программе.';
+        console.error(`Error loading ${cfg.file}:`, e);
+        return cfg.errMsg;
     }
+}
+
+// Backward-compat helpers used elsewhere in the file
+async function loadAboutText() { return loadAboutTabText(aboutTabConfig[0]); }
+async function loadInstructionText() { return loadAboutTabText(aboutTabConfig[1]); }
+
+async function switchAboutTab(tab) {
+    const cfg = aboutTabConfig.find(c => c.tab === tab);
+    if (!cfg) return;
+    for (const c of aboutTabConfig) {
+        document.getElementById(c.bodyId).style.display = 'none';
+        document.getElementById(c.btnId).classList.remove('about-tab--active');
+    }
+    const body = document.getElementById(cfg.bodyId);
+    body.style.display = '';
+    document.getElementById(cfg.btnId).classList.add('about-tab--active');
+    const text = await loadAboutTabText(cfg);
+    body.textContent = text;
+}
+
+for (const c of aboutTabConfig) {
+    document.getElementById(c.btnId).addEventListener('click', () => switchAboutTab(c.tab));
 }
 
 document.getElementById('aboutBtn').addEventListener('click', async () => {
     const modal = document.getElementById('aboutModal');
-    const modalBody = document.getElementById('aboutModalBody');
-    
-    modalBody.textContent = 'Загрузка...';
+    for (const c of aboutTabConfig) {
+        const body = document.getElementById(c.bodyId);
+        body.style.display = 'none';
+        body.textContent = 'Загрузка...';
+        document.getElementById(c.btnId).classList.remove('about-tab--active');
+    }
+    const firstCfg = aboutTabConfig[0];
+    document.getElementById(firstCfg.btnId).classList.add('about-tab--active');
+    document.getElementById(firstCfg.bodyId).style.display = '';
     modal.classList.add('active');
-    
-    const text = await loadAboutText();
-    modalBody.textContent = text;
+    const text = await loadAboutTabText(firstCfg);
+    document.getElementById(firstCfg.bodyId).textContent = text;
 });
 
 document.getElementById('closeAboutModal').addEventListener('click', () => {
@@ -4397,22 +4441,24 @@ document.getElementById('setOpsBtn').addEventListener('click', async () => {
         if (!await confirmAction(msg)) return;
 
         // Блокируем ввод и визуально помечаем
+        const lockTip = 'Нажмите «Очистить» (F5) или «Сброс» для разблокировки';
         totalEl.disabled = true;
         totalEl.classList.add('locked-input');
+        totalEl.title = lockTip;
         try { renderFields(); } catch (e) { console.debug?.('renderFields after setOps lock failed', e?.message); }
 
         // Также отключаем выбор техкарты и кнопки Сохранить/Удалить
         try {
             const sel = document.getElementById('techCardSelect');
-            if (sel) { sel.disabled = true; sel.classList.add('locked-input'); }
+            if (sel) { sel.disabled = true; sel.classList.add('locked-input'); sel.title = lockTip; }
             // Блокируем поле поиска кастомного выпадающего списка
             if (globalThis._tcDropdown) globalThis._tcDropdown.lock();
             const saveBtn = document.getElementById('saveCardBtn');
-            if (saveBtn) { saveBtn.disabled = true; saveBtn.classList.add('locked-control'); }
+            if (saveBtn) { saveBtn.disabled = true; saveBtn.classList.add('locked-control'); saveBtn.title = lockTip; }
             const delBtn = document.getElementById('deleteCardBtn');
-            if (delBtn) { delBtn.disabled = true; delBtn.classList.add('locked-control'); }
+            if (delBtn) { delBtn.disabled = true; delBtn.classList.add('locked-control'); delBtn.title = lockTip; }
             const analyzeBtn = document.getElementById('analyzeCardBtn');
-            if (analyzeBtn) { analyzeBtn.disabled = true; analyzeBtn.classList.add('locked-control'); }
+            if (analyzeBtn) { analyzeBtn.disabled = true; analyzeBtn.classList.add('locked-control'); analyzeBtn.title = lockTip; }
         } catch (e) { console.debug?.('lock tech card controls failed', e?.message); }
     }
 
