@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, LazyLock};
 use std::time::{Duration, Instant};
 use std::collections::HashMap;
+use sha2::{Digest, Sha256};
 
 // Rate limiting: максимум 10 операций в секунду на команду
 const MAX_CALLS_PER_SECOND: usize = 10;
@@ -197,6 +198,17 @@ fn read_file_secure(path: String) -> Result<String, String> {
         .map_err(|e| format!("Ошибка чтения: {}", e))
 }
 
+/// Вычисляет SHA-256 хеш исполняемого файла приложения
+#[tauri::command]
+fn get_exe_hash() -> Result<String, String> {
+    let exe_path = std::env::current_exe()
+        .map_err(|e| format!("Не удалось получить путь к exe: {}", e))?;
+    let bytes = std::fs::read(&exe_path)
+        .map_err(|e| format!("Ошибка чтения exe: {}", e))?;
+    let hash = Sha256::digest(&bytes);
+    Ok(format!("{:x}", hash))
+}
+
 /// Возвращает список разрешённых директорий
 #[tauri::command]
 fn get_allowed_dirs() -> Vec<String> {
@@ -221,7 +233,8 @@ pub fn run() {
             save_file_secure,
             save_file_binary,
             read_file_secure,
-            get_allowed_dirs
+            get_allowed_dirs,
+            get_exe_hash
         ])
         .setup(|_app| {
             // DevTools только в debug режиме

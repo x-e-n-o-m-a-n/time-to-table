@@ -1,7 +1,9 @@
 /* Этот файл является частью time-to-table */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 
-body { 
+[hidden] { display: none !important; }
+
+body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
     background: #f4f6f8; 
     padding: 20px; 
@@ -1498,6 +1500,46 @@ body.dark #sessionSelect {
     color: #2563eb;
     border-bottom-color: #2563eb;
 }
+
+/* SHA-256 блок в модале "О программе" */
+.about-hash-block {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 25px;
+    border-top: 1px solid #e5e7eb;
+    background: #f9fafb;
+    flex-wrap: wrap;
+}
+.about-hash-label {
+    font-size: 12px;
+    color: #6b7280;
+    white-space: nowrap;
+    font-weight: 600;
+}
+.about-hash-value {
+    font-family: 'Courier New', Consolas, monospace;
+    font-size: 11px;
+    color: #1f2937;
+    background: #e5e7eb;
+    padding: 3px 8px;
+    border-radius: 4px;
+    word-break: break-all;
+    flex: 1;
+    min-width: 0;
+}
+.about-hash-copy {
+    white-space: nowrap;
+    flex-shrink: 0;
+    font-size: 11px;
+    padding: 3px 10px;
+    background: #3b82f6;
+}
+
+body.dark .about-hash-block { background: #1f2128; border-top-color: #374151; }
+body.dark .about-hash-label { color: #9ca3af; }
+body.dark .about-hash-value { background: #374151; color: #e5e7eb; }
+body.dark .about-hash-copy { background: #2563eb; }
 
 /* === Модальное окно "Синтаксический Анализ" === */
 .analyze-modal-content {

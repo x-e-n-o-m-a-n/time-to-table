@@ -52,10 +52,10 @@ async function initTauriApi() {
 
 // Безопасная запись файла через Rust команду
 async function saveFileSecure(path, content) {
-    if (tauriInvoke) {
-        return await tauriInvoke('save_file_secure', { path, content });
-    }
-    throw new Error('Tauri недоступен');
+    if (!tauriInvoke) throw new Error('Tauri недоступен');
+    const result = await tauriInvoke('save_file_secure', { path, content });
+    if (typeof result !== 'string') throw new Error('Неожиданный ответ от бэкенда');
+    return result;
 }
 
 // Вызываем при загрузке с задержкой для гарантии загрузки Tauri
@@ -110,6 +110,10 @@ async function safeLocalStorageSet(key, value) {
     try {
         localStorage.setItem(key, value);
     } catch (e) {
+        if (e instanceof DOMException && e.name === 'QuotaExceededError') {
+            safeLogError('localStorage quota exceeded for key:', key);
+            throw new Error('Хранилище заполнено. Удалите старые сессии или историю.');
+        }
         safeLogError('localStorage set error:', e);
         throw e;
     }
@@ -125,11 +129,12 @@ async function safeLocalStorageRemove(key) {
 
 // Защита от Excel-инъекций: если текст начинается с символов формулы,
 // добавляем ведущую апостроф-кавычку, чтобы Excel воспринимал это как текст.
+// Проверяем trimmed-значение, чтобы поймать вариант " =formula" (пробел/таб перед =).
 function excelSanitizeCell(str) {
     if (typeof str !== 'string') return '';
     if (str.length === 0) return '';
-    const first = str[0];
-    if (['=', '+', '-', '@'].includes(first)) return "'" + str;
+    const first = str.trimStart()[0];
+    if (first !== undefined && ['=', '+', '-', '@'].includes(first)) return "'" + str;
     return str;
 }
 
@@ -493,9 +498,10 @@ function sanitizeObject(obj) {
     }
     
     const clean = {};
+    const DANGEROUS_KEYS = ['__proto__', 'constructor', 'prototype'];
     for (const key of Object.keys(obj)) {
-        // Блокируем prototype pollution атаки
-        if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+        // Блокируем prototype pollution атаки (включая вариации регистра)
+        if (DANGEROUS_KEYS.includes(key.toLowerCase())) {
             safeDebug('Blocked potentially dangerous key:', key);
             continue;
         }
@@ -509,7 +515,8 @@ function validateImportData(obj) {
     return Object.entries(obj).every(([key, value]) => {
         if (!key.startsWith('z7_card_')) return false;
         // Дополнительная проверка на опасные ключи
-        if (key.includes('__proto__') || key.includes('constructor')) return false;
+        const keyL = key.toLowerCase();
+        if (keyL.includes('__proto__') || keyL.includes('constructor') || keyL.includes('prototype')) return false;
         try {
             const parsed = safeJsonParse(value);
             return parsed && validateCardData(parsed);
@@ -825,11 +832,11 @@ async function saveHistoryToStorage() {
 
 function restoreHistoryFromStorage() {
     try {
-        const historyJson = localStorage.getItem('z7_history_session');
-        if (!historyJson) return;
-        
         const historyList = document.getElementById('historyList');
         historyList.textContent = '';
+
+        const historyJson = localStorage.getItem('z7_history_session');
+        if (!historyJson) return;
         
         const historyData = safeJsonParse(historyJson);
         if (!Array.isArray(historyData)) return;
@@ -926,7 +933,7 @@ async function saveSessionsMeta() {
 }
 
 function generateSessionId() {
-    return String(Date.now());
+    return secureRandomHex(12);
 }
 
 // Сохраняет текущий активный буфер (z7_history_session) в слот сессии
@@ -1004,6 +1011,11 @@ async function createNewSession() {
     name = sanitizeStrict(name, 100).trim();
     if (!name) return;
 
+    if (sessionsMeta.some(s => s.name === name)) {
+        globalThis.alert(`Сессия с названием "${name}" уже существует. Выберите другое название.`);
+        return;
+    }
+
     // Сохраняем текущую сессию
     await saveCurrentSessionData();
 
@@ -1074,6 +1086,11 @@ async function renameSession(id) {
     if (!newName) return;
     newName = sanitizeStrict(newName, 100).trim();
     if (!newName || newName === session.name) return;
+
+    if (sessionsMeta.some(s => s.id !== id && s.name === newName)) {
+        globalThis.alert(`Сессия с названием "${newName}" уже существует. Выберите другое название.`);
+        return;
+    }
 
     session.name = newName;
     await saveSessionsMeta();
@@ -3953,6 +3970,7 @@ const aboutTabConfig = [
     { tab: 'licenseRu',  btnId: 'aboutTabLicenseRu',  bodyId: 'aboutLicenseRuBody', file: 'license(ru).md',  errMsg: 'Ошибка загрузки лицензии (рус).' },
 ];
 const aboutTabCache = {};
+let cachedExeHash = null;
 
 async function loadAboutTabText(cfg) {
     if (aboutTabCache[cfg.tab]) return aboutTabCache[cfg.tab];
@@ -3975,11 +3993,11 @@ async function switchAboutTab(tab) {
     const cfg = aboutTabConfig.find(c => c.tab === tab);
     if (!cfg) return;
     for (const c of aboutTabConfig) {
-        document.getElementById(c.bodyId).style.display = 'none';
+        document.getElementById(c.bodyId).hidden = true;
         document.getElementById(c.btnId).classList.remove('about-tab--active');
     }
     const body = document.getElementById(cfg.bodyId);
-    body.style.display = '';
+    body.hidden = false;
     document.getElementById(cfg.btnId).classList.add('about-tab--active');
     const text = await loadAboutTabText(cfg);
     body.textContent = text;
@@ -3993,20 +4011,48 @@ document.getElementById('aboutBtn').addEventListener('click', async () => {
     const modal = document.getElementById('aboutModal');
     for (const c of aboutTabConfig) {
         const body = document.getElementById(c.bodyId);
-        body.style.display = 'none';
+        body.hidden = true;
         body.textContent = 'Загрузка...';
         document.getElementById(c.btnId).classList.remove('about-tab--active');
     }
     const firstCfg = aboutTabConfig[0];
     document.getElementById(firstCfg.btnId).classList.add('about-tab--active');
-    document.getElementById(firstCfg.bodyId).style.display = '';
+    document.getElementById(firstCfg.bodyId).hidden = false;
     modal.classList.add('active');
     const text = await loadAboutTabText(firstCfg);
     document.getElementById(firstCfg.bodyId).textContent = text;
+
+    // Загружаем SHA-256 хеш exe (один раз, далее из кеша)
+    const hashEl = document.getElementById('aboutExeHash');
+    if (hashEl) {
+        if (cachedExeHash) {
+            hashEl.textContent = cachedExeHash;
+        } else if (tauriInvoke) {
+            tauriInvoke('get_exe_hash')
+                .then(hash => {
+                    cachedExeHash = hash;
+                    hashEl.textContent = hash;
+                })
+                .catch(() => { hashEl.textContent = 'Недоступно'; });
+        } else {
+            hashEl.textContent = 'Недоступно (dev)';
+        }
+    }
 });
 
 document.getElementById('closeAboutModal').addEventListener('click', () => {
     document.getElementById('aboutModal').classList.remove('active');
+});
+
+document.getElementById('copyHashBtn').addEventListener('click', () => {
+    const hash = cachedExeHash;
+    if (!hash) return;
+    navigator.clipboard.writeText(hash).then(() => {
+        const btn = document.getElementById('copyHashBtn');
+        const prev = btn.textContent;
+        btn.textContent = 'Скопировано!';
+        setTimeout(() => { btn.textContent = prev; }, 1500);
+    }).catch(() => {});
 });
 
 // Закрытие по Escape
