@@ -273,9 +273,9 @@ const DEFAULTS_KEY = 'z7_defaults';
 
 // Возвращает '#000000' или '#FFFFFF' — цвет текста с достаточным контрастом (WCAG) для заданного фона
 function getContrastColor(hex) {
-    const r = parseInt(hex.slice(1, 3), 16) / 255;
-    const g = parseInt(hex.slice(3, 5), 16) / 255;
-    const b = parseInt(hex.slice(5, 7), 16) / 255;
+    const r = Number.parseInt(hex.slice(1, 3), 16) / 255;
+    const g = Number.parseInt(hex.slice(3, 5), 16) / 255;
+    const b = Number.parseInt(hex.slice(5, 7), 16) / 255;
     const lin = c => c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
     const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
     return L > 0.179 ? '#000000' : '#FFFFFF';
@@ -2204,7 +2204,7 @@ async function exportToExcel() {
 
     // === ЦВЕТОВАЯ ПАЛИТРА EXCEL — загружается из настроек (меняется в «Настройки По Умолчанию») ===
     const _ec = getUserDefaults().excelColors;
-    const hexToArgb = (hex) => 'FF' + hex.replace('#', '').toUpperCase();
+    const hexToArgb = (hex) => 'FF' + hex.replaceAll('#', '').toUpperCase();
     const FILL_LOCKED    = { type: 'pattern', pattern: 'solid', fgColor: { argb: hexToArgb(_ec.locked) } };
     const FILL_EDITABLE  = { type: 'pattern', pattern: 'solid', fgColor: { argb: hexToArgb(_ec.editable) } };
     const FILL_HEADER    = { type: 'pattern', pattern: 'solid', fgColor: { argb: hexToArgb(_ec.header) } };
