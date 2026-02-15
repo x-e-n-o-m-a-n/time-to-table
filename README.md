@@ -1,4 +1,4 @@
-# Time-To-Table v0.6.9 (Калькулятор для ленивых)
+# Time-To-Table v0.7.0 (Калькулятор для ленивых)
 
 > автор: Галимзянов Г.Р.
 
@@ -201,6 +201,10 @@ C:\Users\<ИМЯ>\AppData\Local\com.timetotable.calculator\
 ---
 
 ## Changelog
+
+### v0.7.0
+
+- Очередные правки логики.
 
 ### v0.6.9
 

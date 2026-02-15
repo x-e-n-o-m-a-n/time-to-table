@@ -279,7 +279,7 @@ function getContrastColor(hex) {
 // Встроенные умолчания
 function _builtinDefaults() {
     return {
-        chainMode: true,
+        chainMode: false,
         timeMode: 'total',
         statusBefore: 'замечаний нет',
         workExtra: 'нет',
@@ -2226,10 +2226,12 @@ async function exportToExcel() {
             timeLocked:      { font: FONT_LOCKED,   fill: FILL_LOCKED,   alignment: ALIGN_CENTER,       border: brd(),   numFmt: 'h:mm:ss',    locked: true },
             timeEditable:    { font: FONT_EDITABLE, fill: FILL_EDITABLE, alignment: ALIGN_CENTER,       border: brd(),   numFmt: 'h:mm:ss',    locked: false },
             durEditable:     { font: FONT_EDITABLE, fill: FILL_EDITABLE, alignment: ALIGN_CENTER,       border: brd(),   numFmt: '0.00',       locked: false },
+            durFormula:      { font: FONT_PDTV,     fill: FILL_PDTV,     alignment: ALIGN_CENTER,       border: brd(),   numFmt: '0.00',       locked: false },
             durLocked:       { font: FONT_LOCKED,   fill: FILL_LOCKED,   alignment: ALIGN_CENTER,       border: brd(),   numFmt: '0.00',       locked: true },
             dateLocked:      { font: FONT_LOCKED,   fill: FILL_LOCKED,   alignment: ALIGN_CENTER,       border: brd(),   numFmt: 'dd.mm.yyyy', locked: true },
             dateEditable:    { font: FONT_EDITABLE, fill: FILL_EDITABLE, alignment: ALIGN_CENTER,       border: brd(),   numFmt: 'dd.mm.yyyy', locked: false },
             borderEditable:  { font: FONT_EDITABLE, fill: FILL_EDITABLE, alignment: ALIGN_CENTER,       border: brd(),                  locked: false },
+            workerFormula:   { font: FONT_PDTV,     fill: FILL_PDTV,     alignment: ALIGN_CENTER,       border: brd(),                  locked: false },
             pdtvLocked:      { font: FONT_LOCKED,   fill: FILL_LOCKED,   alignment: ALIGN_CENTER,       border: brd({ thickLeft: true }),locked: true },
             pdtvEditable:    { font: FONT_EDITABLE, fill: FILL_EDITABLE, alignment: ALIGN_CENTER,       border: brd({ thickLeft: true }),locked: false },
             pdtvFormula:     { font: FONT_PDTV,     fill: FILL_PDTV,     alignment: ALIGN_CENTER,       border: brd({ thickLeft: true }),locked: false },
@@ -2288,7 +2290,7 @@ async function exportToExcel() {
     // --- Строка 2: Информация об авторе ---
     const authorRow = ws.addRow([]);
     sheetRow++;
-    setMergedRow(ws, sheetRow, 'Создано при помощи калькулятора для ленивых v.0.6.9',
+    setMergedRow(ws, sheetRow, 'Создано при помощи калькулятора для ленивых v.0.7.0',
         { font: FONT_AUTHOR, fill: FILL_AUTHOR, alignment: { horizontal: 'center', vertical: 'middle' }, locked: true });
     authorRow.height = 50;
 
@@ -2395,8 +2397,9 @@ async function exportToExcel() {
         // Якорная строка ПДТВ для текущей записи (используется для Excel-формул в авто-режиме)
         let entryBaseGRow = null;
         let entryBaseOffset = 0;
-        // Строка первого исполнителя каждой операции (для формул ручного режима)
+        // Строка первого исполнителя каждой операции (для формул ручного режима ПДТВ и индивидуальной длительности)
         const opFirstWorkerGRow = {};
+        const opFirstWorkerLRow = {};
 
         rowsForExport.forEach((r, idx) => {
             const pauseVal = typeof r.pauseExcelVal === 'number' ? r.pauseExcelVal : 0;
@@ -2415,8 +2418,16 @@ async function exportToExcel() {
             // === ДЛИТЕЛЬНОСТЬ ===
             let durValue, durStyle;
             if (data.timeMode === 'individual') {
-                durValue = r.durVal;
-                durStyle = styles.durEditable;
+                if (curOpNum !== prevRowOpNum) {
+                    // Первый исполнитель операции — якорная ячейка
+                    durValue = r.durVal;
+                    durStyle = styles.durEditable;
+                    opFirstWorkerLRow[curOpNum] = curRow;
+                } else {
+                    // Последующие исполнители — ссылка на первую запись длительности этой операции
+                    durValue = { formula: `L${opFirstWorkerLRow[curOpNum]}` };
+                    durStyle = styles.durFormula;
+                }
             } else {
                 if (curOpNum === prevRowOpNum) {
                     durValue = { formula: `L${curRow - 1}` };
@@ -2608,7 +2619,7 @@ async function exportToExcel() {
                 workerStyle = styles.borderEditable;
             } else {
                 workerValue = { formula: `P${targetWorkerRow}` };
-                workerStyle = styles.borderLocked;
+                workerStyle = styles.workerFormula;
             }
 
             // === ДАТА ПРОВОДКИ (глобальная привязка) ===
