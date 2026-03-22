@@ -15,11 +15,16 @@ src-tauri/gen/
 # OS/IDE
 .DS_Store
 Thumbs.db
+.claude
 .visited
 .vscode/
 .idea/
 *.swp
 *.swo
+TimeToTable_VBA.xlsm
+export.xlsx
+История_Расчетов_20-03-2026.xlsx
+
 
 # Environment
 .env
