@@ -544,10 +544,10 @@ Public Sub GenerateAndAppendHistory()
                 Dim intendedStart As Date
                 If outRow = 2 Then
                     intendedStart = baseStart + breakDays
-                    startDT = ShiftStartOutOfLunch(intendedStart, lunch1, lunch2, lunchDurMin)
+                    startDT = ShiftStartOutOfLunch(intendedStart, lunch1, lunch2, hasLunch2, lunchDurDays)
                 ElseIf isFirstWorkerInOp Then
                     intendedStart = prevEndDT + breakDays
-                    startDT = ShiftStartOutOfLunch(intendedStart, lunch1, lunch2, lunchDurMin)
+                    startDT = ShiftStartOutOfLunch(intendedStart, lunch1, lunch2, hasLunch2, lunchDurDays)
                 Else
                     intendedStart = prevStartDT
                     startDT = prevStartDT
@@ -606,7 +606,7 @@ Public Sub GenerateAndAppendHistory()
                     wsOut.Cells(outRow, 4).Value = ""
                 End If
 
-                wsOut.Cells(outRow, 22).Value = CStr(opNum) & "_" & CStr(workerValue)
+                wsOut.Cells(outRow, 22).Value = CStr(opNum) & "_" & CStr(w)
 
                 prevStartDT = startDT
                 prevEndDT = endDT
@@ -1111,7 +1111,7 @@ Private Sub ParseLunchParams( _
 End Sub
 
 Private Function ComputeEndWithLunch( _
-    ByRef opStart As Date, _
+    ByVal opStart As Date, _
     ByVal durationDays As Double, _
     ByVal lunch1 As Date, _
     ByVal lunch2 As Date, _
@@ -1119,186 +1119,251 @@ Private Function ComputeEndWithLunch( _
     ByVal lunchDurDays As Double, _
     ByRef crossedLunch As Boolean) As Date
 
-    Dim opEnd As Date, changed As Boolean, guard As Long
+    Dim opEnd As Date
     opEnd = opStart + durationDays
-    guard = 0
 
-    Do
-        changed = False
-        guard = guard + 1
-        If guard > 2000 Then Exit Do
+    Dim lStart As Date, lEnd As Date
+    Dim daySerial As Long
 
-        If CheckLunchWindow(opStart, opEnd, lunch1, lunchDurDays, crossedLunch) Then
-            changed = True
-            GoTo ContinueLoop
+    ' 1. Check Lunch 1
+    For daySerial = CLng(Int(opStart)) - 1 To CLng(Int(opEnd)) + 1
+        lStart = daySerial + TimePart(lunch1)
+        lEnd = lStart + lunchDurDays
+
+        If opStart < lStart And opEnd > lStart Then
+            opEnd = opEnd + lunchDurDays
+            crossedLunch = True
+            Exit For
         End If
+    Next daySerial
 
-        If hasLunch2 Then
-            If CheckLunchWindow(opStart, opEnd, lunch2, lunchDurDays, crossedLunch) Then
-                changed = True
-                GoTo ContinueLoop
+    ' 2. Check Lunch 2
+    If hasLunch2 Then
+        For daySerial = CLng(Int(opStart)) - 1 To CLng(Int(opEnd)) + 1
+            lStart = daySerial + TimePart(lunch2)
+            lEnd = lStart + lunchDurDays
+
+            If opStart < lStart And opEnd > lStart Then
+                opEnd = opEnd + lunchDurDays
+                crossedLunch = True
+                Exit For
             End If
-        End If
-
-ContinueLoop:
-    Loop While changed
+        Next daySerial
+    End If
 
     ComputeEndWithLunch = opEnd
 End Function
 
-Public Function ShiftStartOutOfLunch( _
+Private Function ShiftStartOutOfLunch( _
     ByVal startDateTime As Date, _
-    ByVal lunch1Raw As Variant, _
-    ByVal lunch2Raw As Variant, _
-    ByVal lunchDurMin As Double) As Date
+    ByVal lunch1 As Date, _
+    ByVal lunch2 As Date, _
+    ByVal hasLunch2 As Boolean, _
+    ByVal lunchDurDays As Double) As Date
 
-    On Error GoTo EH
-
-    Dim lunch1 As Date, lunch2 As Date, hasLunch2 As Boolean, lunchDurDays As Double
-    ParseLunchParams lunch1Raw, lunch2Raw, lunchDurMin, lunch1, lunch2, hasLunch2, lunchDurDays
-
-    Dim endProbe As Date, crossed As Boolean
-    endProbe = startDateTime
-    crossed = False
-
-    If CheckLunchWindow(startDateTime, endProbe, lunch1, lunchDurDays, crossed) Then
-        ' startDateTime уже сдвинут внутри окна
-    End If
-    If hasLunch2 Then
-        crossed = False
-        endProbe = startDateTime
-        If CheckLunchWindow(startDateTime, endProbe, lunch2, lunchDurDays, crossed) Then
-            ' startDateTime уже сдвинут
-        End If
-    End If
-
-    ShiftStartOutOfLunch = startDateTime
-    Exit Function
-EH:
-    ShiftStartOutOfLunch = startDateTime
-End Function
-
-Public Function ComputeEndWithLunchFormula( _
-    ByVal startDateTime As Date, _
-    ByVal durationDays As Double, _
-    ByVal lunch1Raw As Variant, _
-    ByVal lunch2Raw As Variant, _
-    ByVal lunchDurMin As Double) As Date
-
-    On Error GoTo EH
-
-    Dim lunch1 As Date, lunch2 As Date, hasLunch2 As Boolean, lunchDurDays As Double
-    ParseLunchParams lunch1Raw, lunch2Raw, lunchDurMin, lunch1, lunch2, hasLunch2, lunchDurDays
-
-    Dim st As Date, en As Date, crossed As Boolean
+    Dim st As Date
     st = startDateTime
-    crossed = False
-    en = ComputeEndWithLunch(st, durationDays, lunch1, lunch2, hasLunch2, lunchDurDays, crossed)
-    ComputeEndWithLunchFormula = en
-    Exit Function
-EH:
-    ComputeEndWithLunchFormula = startDateTime + durationDays
-End Function
 
-Public Function DidCrossLunch( _
-    ByVal startDateTime As Date, _
-    ByVal endDateTime As Date, _
-    ByVal lunch1Raw As Variant, _
-    ByVal lunch2Raw As Variant, _
-    ByVal lunchDurMin As Double) As Boolean
+    Dim daySerial As Long
+    ' Check lunch 1
+    For daySerial = CLng(Int(st)) - 1 To CLng(Int(st)) + 1
+        Dim lStart As Date, lEnd As Date
+        lStart = daySerial + TimePart(lunch1)
+        lEnd = lStart + lunchDurDays
+        If st >= lStart - 0.00001 And st < lEnd Then
+            st = lEnd
+            Exit For
+        End If
+    Next daySerial
 
-    On Error GoTo EH
-
-    Dim lunch1 As Date, lunch2 As Date, hasLunch2 As Boolean, lunchDurDays As Double
-    ParseLunchParams lunch1Raw, lunch2Raw, lunchDurMin, lunch1, lunch2, hasLunch2, lunchDurDays
-
-    DidCrossLunch = IntervalIntersectsLunch(startDateTime, endDateTime, lunch1, lunchDurDays)
-    If Not DidCrossLunch And hasLunch2 Then
-        DidCrossLunch = IntervalIntersectsLunch(startDateTime, endDateTime, lunch2, lunchDurDays)
+    ' Check lunch 2
+    If hasLunch2 Then
+        For daySerial = CLng(Int(st)) - 1 To CLng(Int(st)) + 1
+            Dim l2Start As Date, l2End As Date
+            l2Start = daySerial + TimePart(lunch2)
+            l2End = l2Start + lunchDurDays
+            If st >= l2Start - 0.00001 And st < l2End Then
+                st = l2End
+                Exit For
+            End If
+        Next daySerial
     End If
-    Exit Function
-EH:
-    DidCrossLunch = False
+
+    ShiftStartOutOfLunch = st
 End Function
 
-Public Function LunchFlag( _
-    ByVal startDateTime As Date, _
-    ByVal endDateTime As Date, _
-    ByVal lunch1Raw As Variant, _
-    ByVal lunch2Raw As Variant, _
-    ByVal lunchDurMin As Double) As String
+' ==========================================
+' PURE EXCEL FORMULA BUILDERS
+' ==========================================
+Private Function BuildLunchShiftFormulaStr(ByVal rawTimeExpr As String, _
+    ByVal lunch1 As Date, ByVal lunch2 As Date, ByVal lunchDurMin As Double) As String
 
-    If DidCrossLunch(startDateTime, endDateTime, lunch1Raw, lunch2Raw, lunchDurMin) Then
-        LunchFlag = UW(1044, 1040)
+    Dim lh As Long, lm As Long
+    Dim lh2 As Long, lm2 As Long
+    Dim ld As Long
+    lh = Hour(lunch1): lm = Minute(lunch1)
+    lh2 = Hour(lunch2): lm2 = Minute(lunch2)
+    ld = CLng(lunchDurMin)
+
+    Dim l1Val As String, l1End As String
+    l1Val = "TIME(" & lh & "," & lm & ",0)"
+    l1End = "(TIME(" & lh & "," & lm & ",0)+TIME(0," & ld & ",0))"
+
+    Dim tp As String, cond1 As String, res1 As String, shifted1 As String
+        tp = "ROUND(MOD(" & rawTimeExpr & ", 1), 6)"
+        Dim l1vR As String, l1eR As String
+        l1vR = "ROUND(" & l1Val & ", 6)"
+        l1eR = "ROUND(" & l1End & ", 6)"
+
+        cond1 = "AND(" & tp & ">=" & l1vR & ", " & tp & "<" & l1eR & ")"
+    res1 = "(INT(" & rawTimeExpr & ") + " & l1End & ")"
+    shifted1 = "IF(" & cond1 & "," & res1 & "," & rawTimeExpr & ")"
+
+    Dim hasLunch2 As Boolean
+    hasLunch2 = (Format$(lunch2, "hh:nn:ss") <> "00:00:00")
+
+    If hasLunch2 Then
+        Dim l2Val As String, l2End As String
+        Dim tp2 As String, cond2 As String, res2 As String
+        l2Val = "TIME(" & lh2 & "," & lm2 & ",0)"
+        l2End = "(TIME(" & lh2 & "," & lm2 & ",0)+TIME(0," & ld & ",0))"
+
+            tp2 = "ROUND(MOD(" & shifted1 & ", 1), 6)"
+            Dim l2vR As String, l2eR As String
+            l2vR = "ROUND(" & l2Val & ", 6)"
+            l2eR = "ROUND(" & l2End & ", 6)"
+            
+            cond2 = "AND(" & tp2 & ">=" & l2vR & ", " & tp2 & "<" & l2eR & ")"
+        res2 = "(INT(" & shifted1 & ") + " & l2End & ")"
+
+        BuildLunchShiftFormulaStr = "IF(" & cond2 & "," & res2 & "," & shifted1 & ")"
     Else
-        LunchFlag = ""
+        BuildLunchShiftFormulaStr = shifted1
     End If
 End Function
 
-Private Function IntervalIntersectsLunch( _
-    ByVal startDateTime As Date, _
-    ByVal endDateTime As Date, _
-    ByVal lunchTime As Date, _
-    ByVal lunchDurDays As Double) As Boolean
+Private Sub BuildEndFormulasStr(ByVal startDateExpr As String, ByVal startTimeExpr As String, _
+    ByVal durExpr As String, ByVal unitDiv As String, _
+    ByVal lunch1 As Date, ByVal lunch2 As Date, ByVal lunchDurMin As Double, _
+    ByRef outEndDateFormula As String, ByRef outEndTimeFormula As String)
 
-    Dim daySerial As Long
-    For daySerial = CLng(Int(startDateTime)) - 1 To CLng(Int(endDateTime)) + 1
-        Dim lunchStart As Date, lunchEnd As Date
-        lunchStart = daySerial + TimePart(lunchTime)
-        lunchEnd = lunchStart + lunchDurDays
+    Dim lh As Long, lm As Long
+    Dim lh2 As Long, lm2 As Long
+    Dim ld As Long
+    lh = Hour(lunch1): lm = Minute(lunch1)
+    lh2 = Hour(lunch2): lm2 = Minute(lunch2)
+    ld = CLng(lunchDurMin)
 
-        If (startDateTime < lunchStart And endDateTime > lunchStart) Or _
-           (startDateTime >= lunchStart And startDateTime < lunchEnd) Then
-            IntervalIntersectsLunch = True
-            Exit Function
-        End If
-    Next daySerial
+    Dim l1Val As String, l1End As String, lDurVal As String
+    l1Val = "TIME(" & lh & "," & lm & ",0)"
+    l1End = "(TIME(" & lh & "," & lm & ",0)+TIME(0," & ld & ",0))"
+    lDurVal = "TIME(0," & ld & ",0)"
 
-    IntervalIntersectsLunch = False
-End Function
+    Dim hasLunch2 As Boolean
+    hasLunch2 = (Format$(lunch2, "hh:nn:ss") <> "00:00:00")
 
-Private Function CheckLunchWindow( _
-    ByRef opStart As Date, _
-    ByRef opEnd As Date, _
-    ByVal lunchTime As Date, _
-    ByVal lunchDurDays As Double, _
-    ByRef crossedLunch As Boolean) As Boolean
+    Dim stMod As String, rawEndRel As String, enC1 As String, enShift1 As String, mainMath As String
+        stMod = "ROUND(MOD(" & startTimeExpr & ", 1), 6)"
+        rawEndRel = "ROUND(" & stMod & "+(" & durExpr & "/" & unitDiv & "), 6)"
 
-    Const EPS As Double = 0.00001
+        Dim l1vR As String, l1vCR As String, l1v1R As String, l1v1CR As String
+        l1vR = "ROUND(" & l1Val & ", 6)"
+        l1vCR = "ROUND(" & l1Val & "+TIME(0,0,1), 6)"
+        l1v1R = "ROUND((" & l1Val & "+1), 6)"
+        l1v1CR = "ROUND((" & l1Val & "+1)+TIME(0,0,1), 6)"
 
-    Dim durationKeep As Double
-    durationKeep = opEnd - opStart
+        enC1 = "OR(AND(" & stMod & "<" & l1vR & ", " & rawEndRel & ">=" & l1vCR & "), AND(" & stMod & "<" & l1v1R & ", " & rawEndRel & ">=" & l1v1CR & "))"
+    enShift1 = "IF(" & enC1 & ", " & lDurVal & ", 0)"
+    mainMath = "(" & startDateExpr & ") + (" & startTimeExpr & ") + (" & durExpr & "/" & unitDiv & ") + " & enShift1
 
-    Dim daySerial As Long
-    For daySerial = CLng(Int(opStart)) - 1 To CLng(Int(opEnd)) + 1
-        Dim lunchStart As Date, lunchEnd As Date
-        lunchStart = daySerial + TimePart(lunchTime)
-        lunchEnd = lunchStart + lunchDurDays
+    If hasLunch2 Then
+        Dim l2Val As String, l2End As String
+        l2Val = "TIME(" & lh2 & "," & lm2 & ",0)"
+        l2End = "(TIME(" & lh2 & "," & lm2 & ",0)+TIME(0," & ld & ",0))"
 
-        If opStart >= lunchStart - EPS And opStart < lunchEnd Then
-            opStart = lunchEnd
-            opEnd = opStart + durationKeep
-            crossedLunch = True
-            CheckLunchWindow = True
-            Exit Function
-        End If
+        Dim stMod2 As String, rawEndRel2 As String, enC2 As String, enShift2 As String
+            stMod2 = "ROUND(MOD((" & startTimeExpr & ") + " & enShift1 & ", 1), 6)"
+            rawEndRel2 = "ROUND(" & stMod2 & "+(" & durExpr & "/" & unitDiv & "), 6)"
 
-        If opStart < lunchStart And opEnd > lunchStart Then
-            Dim beforeLunch As Double, afterLunch As Double
-            beforeLunch = lunchStart - opStart
-            afterLunch = durationKeep - beforeLunch
-            If afterLunch < 0 Then afterLunch = 0
+            Dim l2vR As String, l2vCR As String, l2v1R As String, l2v1CR As String
+            l2vR = "ROUND(" & l2Val & ", 6)"
+            l2vCR = "ROUND(" & l2Val & "+TIME(0,0,1), 6)"
+            l2v1R = "ROUND((" & l2Val & "+1), 6)"
+            l2v1CR = "ROUND((" & l2Val & "+1)+TIME(0,0,1), 6)"
 
-            opStart = lunchEnd
-            opEnd = opStart + afterLunch
-            durationKeep = opEnd - opStart
-            crossedLunch = True
-            CheckLunchWindow = True
-            Exit Function
-        End If
-    Next daySerial
+            enC2 = "OR(AND(" & stMod2 & "<" & l2vR & ", " & rawEndRel2 & ">=" & l2vCR & "), AND(" & stMod2 & "<" & l2v1R & ", " & rawEndRel2 & ">=" & l2v1CR & "))"
+        enShift2 = "IF(" & enC2 & ", " & lDurVal & ", 0)"
 
-    CheckLunchWindow = False
+        outEndDateFormula = "INT(" & mainMath & " + " & enShift2 & ")"
+        outEndTimeFormula = "MOD(" & mainMath & " + " & enShift2 & ", 1)"
+    Else
+        outEndDateFormula = "INT(" & mainMath & ")"
+        outEndTimeFormula = "MOD(" & mainMath & ", 1)"
+    End If
+End Sub
+
+Private Function BuildLunchIconFormulaStr(ByVal startTimeExpr As String, ByVal durExpr As String, ByVal unitDiv As String, _
+    ByVal lunch1 As Date, ByVal lunch2 As Date, ByVal lunchDurMin As Double, ByVal daStr As String) As String
+
+    Dim lh As Long, lm As Long
+    Dim lh2 As Long, lm2 As Long
+    Dim ld As Long
+    lh = Hour(lunch1): lm = Minute(lunch1)
+    lh2 = Hour(lunch2): lm2 = Minute(lunch2)
+    ld = CLng(lunchDurMin)
+
+    Dim l1Val As String, l1End As String, lDurVal As String
+    l1Val = "TIME(" & lh & "," & lm & ",0)"
+    l1End = "(TIME(" & lh & "," & lm & ",0)+TIME(0," & ld & ",0))"
+    lDurVal = "TIME(0," & ld & ",0)"
+
+    Dim hasLunch2 As Boolean
+    hasLunch2 = (Format$(lunch2, "hh:nn:ss") <> "00:00:00")
+
+    Dim startTimeMod As String, endTimeRel As String, l1EndMod As String
+    Dim icWasShifted1 As String, icCovers1 As String, icC1 As String, icShift1 As String
+
+        startTimeMod = "ROUND(MOD(" & startTimeExpr & ", 1), 6)"
+        endTimeRel = "ROUND(" & startTimeMod & "+(" & durExpr & "/" & unitDiv & "), 6)"
+        l1EndMod = "ROUND(MOD(" & l1End & ", 1), 6)"
+
+        Dim l1vR As String, l1vCR As String, l1v1R As String, l1v1CR As String
+        l1vR = "ROUND(" & l1Val & ", 6)"
+        l1vCR = "ROUND(" & l1Val & "+TIME(0,0,1), 6)"
+        l1v1R = "ROUND((" & l1Val & "+1), 6)"
+        l1v1CR = "ROUND((" & l1Val & "+1)+TIME(0,0,1), 6)"
+
+        icWasShifted1 = "ROUND(ABS(" & startTimeMod & "-" & l1EndMod & "), 6)<ROUND(TIME(0,0,1), 6)"
+        icCovers1 = "OR(AND(" & startTimeMod & "<" & l1vR & ", " & endTimeRel & ">" & l1vCR & "), AND(" & startTimeMod & "<" & l1v1R & ", " & endTimeRel & ">" & l1v1CR & "))"
+    icC1 = "OR(" & icWasShifted1 & ", " & icCovers1 & ")"
+    icShift1 = "IF(" & icC1 & ", " & lDurVal & ", 0)"
+
+    If hasLunch2 Then
+        Dim l2Val As String, l2End As String
+        l2Val = "TIME(" & lh2 & "," & lm2 & ",0)"
+        l2End = "(TIME(" & lh2 & "," & lm2 & ",0)+TIME(0," & ld & ",0))"
+
+        Dim shiftedStartMod As String, shiftedEndRel As String, l2EndMod As String
+        Dim icWasShifted2 As String, icCovers2 As String, icC2 As String
+
+            shiftedStartMod = "ROUND(MOD(" & startTimeExpr & "+" & icShift1 & ", 1), 6)"
+            shiftedEndRel = "ROUND(" & shiftedStartMod & "+(" & durExpr & "/" & unitDiv & "), 6)"
+            l2EndMod = "ROUND(MOD(" & l2End & ", 1), 6)"
+
+            Dim l2vR As String, l2vCR As String, l2v1R As String, l2v1CR As String
+            l2vR = "ROUND(" & l2Val & ", 6)"
+            l2vCR = "ROUND(" & l2Val & "+TIME(0,0,1), 6)"
+            l2v1R = "ROUND((" & l2Val & "+1), 6)"
+            l2v1CR = "ROUND((" & l2Val & "+1)+TIME(0,0,1), 6)"
+
+            icWasShifted2 = "ROUND(ABS(" & shiftedStartMod & "-" & l2EndMod & "), 6)<ROUND(TIME(0,0,1), 6)"
+            icCovers2 = "OR(AND(" & shiftedStartMod & "<" & l2vR & ", " & shiftedEndRel & ">" & l2vCR & "), AND(" & shiftedStartMod & "<" & l2v1R & ", " & shiftedEndRel & ">" & l2v1CR & "))"
+        icC2 = "OR(" & icWasShifted2 & ", " & icCovers2 & ")"
+
+        BuildLunchIconFormulaStr = "IF(OR(" & icC1 & ", " & icC2 & "), """ & daStr & """, """")"
+    Else
+        BuildLunchIconFormulaStr = "IF(" & icC1 & ", """ & daStr & """, """")"
+    End If
 End Function
 
 Private Function TimePart(ByVal dateTimeValue As Date) As Double
@@ -1386,11 +1451,6 @@ Private Sub AppendResultToHistory( _
     ByVal clrEditable As Long, _
     ByVal clrFont As Long)
 
-    Dim hLunch1 As String, hLunch2 As String, hLunchDur As String
-    hLunch1 = """" & Format$(lunch1, "hh:nn:ss") & """"
-    hLunch2 = """" & Format$(lunch2, "hh:nn:ss") & """"
-    hLunchDur = NumForFormula(lunchDurMin)
-
     Dim NextRow As Long
     NextRow = wsHist.Cells(wsHist.Rows.Count, 2).End(xlUp).Row + 1
     If NextRow < 2 Then NextRow = 2
@@ -1438,8 +1498,12 @@ Private Sub AppendResultToHistory( _
     Next scanRow
 
     If prevDataEndRow > 0 Then
-        wsHist.Cells(dataStartRow, 18).Formula = "=INT(ShiftStartOutOfLunch(T" & prevDataEndRow & "+U" & prevDataEndRow & "+E" & dataStartRow & "," & hLunch1 & "," & hLunch2 & "," & hLunchDur & "))"
-        wsHist.Cells(dataStartRow, 19).Formula = "=MOD(ShiftStartOutOfLunch(T" & prevDataEndRow & "+U" & prevDataEndRow & "+E" & dataStartRow & "," & hLunch1 & "," & hLunch2 & "," & hLunchDur & "),1)"
+        Dim rawDTFirst As String
+        rawDTFirst = "(T" & prevDataEndRow & "+U" & prevDataEndRow & "+E" & dataStartRow & ")"
+        Dim shiftFFirst As String
+        shiftFFirst = BuildLunchShiftFormulaStr(rawDTFirst, lunch1, lunch2, lunchDurMin)
+        wsHist.Cells(dataStartRow, 18).Formula = "=INT(" & shiftFFirst & ")"
+        wsHist.Cells(dataStartRow, 19).Formula = "=MOD(" & shiftFFirst & ",1)"
     Else
         wsHist.Cells(dataStartRow, 18).Value = wsOut.Cells(2, 18).Value
         wsHist.Cells(dataStartRow, 19).Value = wsOut.Cells(2, 19).Value
@@ -1457,16 +1521,24 @@ Private Sub AppendResultToHistory( _
     Dim rr As Long
     For rr = dataStartRow To dataEndRow
         If rr > dataStartRow Then
-            wsHist.Cells(rr, 18).Formula = "=IF(B" & rr & "=B" & (rr - 1) & ",R" & (rr - 1) & ",INT(ShiftStartOutOfLunch(T" & (rr - 1) & "+U" & (rr - 1) & "+E" & rr & "," & hLunch1 & "," & hLunch2 & "," & hLunchDur & ")))"
-            wsHist.Cells(rr, 19).Formula = "=IF(B" & rr & "=B" & (rr - 1) & ",S" & (rr - 1) & ",MOD(ShiftStartOutOfLunch(T" & (rr - 1) & "+U" & (rr - 1) & "+E" & rr & "," & hLunch1 & "," & hLunch2 & "," & hLunchDur & "),1))"
+            Dim rawDT As String
+            rawDT = "(T" & (rr - 1) & "+U" & (rr - 1) & "+E" & rr & ")"
+            Dim shiftF As String
+            shiftF = BuildLunchShiftFormulaStr(rawDT, lunch1, lunch2, lunchDurMin)
+            wsHist.Cells(rr, 18).Formula = "=IF(B" & rr & "=B" & (rr - 1) & ",R" & (rr - 1) & ",INT(" & shiftF & "))"
+            wsHist.Cells(rr, 19).Formula = "=IF(B" & rr & "=B" & (rr - 1) & ",S" & (rr - 1) & ",MOD(" & shiftF & ",1))"
         End If
 
-        wsHist.Cells(rr, 20).Formula = "=INT(ComputeEndWithLunchFormula(R" & rr & "+S" & rr & ",L" & rr & "/" & lDivisor & "," & hLunch1 & "," & hLunch2 & "," & hLunchDur & "))"
-        wsHist.Cells(rr, 21).Formula = "=MOD(ComputeEndWithLunchFormula(R" & rr & "+S" & rr & ",L" & rr & "/" & lDivisor & "," & hLunch1 & "," & hLunch2 & "," & hLunchDur & "),1)"
+        Dim endD As String, endT As String
+        BuildEndFormulasStr "R" & rr, "S" & rr, "L" & rr, lDivisor, lunch1, lunch2, lunchDurMin, endD, endT
+        wsHist.Cells(rr, 20).Formula = "=" & endD
+        wsHist.Cells(rr, 21).Formula = "=" & endT
     Next rr
 
     For rr = dataStartRow To dataEndRow
-        wsHist.Cells(rr, 4).Formula = "=LunchFlag(R" & rr & "+S" & rr & ",T" & rr & "+U" & rr & "," & hLunch1 & "," & hLunch2 & "," & hLunchDur & ")"
+        Dim iconF As String
+        iconF = BuildLunchIconFormulaStr("S" & rr, "L" & rr, lDivisor, lunch1, lunch2, lunchDurMin, UW(1044, 1040))
+        wsHist.Cells(rr, 4).Formula = "=" & iconF
     Next rr
 
     wsHist.Range("E" & dataStartRow & ":E" & dataEndRow).NumberFormat = "h:mm:ss"
@@ -1613,6 +1685,12 @@ Public Sub LoadMRS()
     Dim clrMrsHeader As Long, clrMrsSub As Long, clrMrsOrder As Long, clrFont As Long
     stage = "Read colors from settings"
     ReadAllColors wsIn, clrLocked, clrLockedFont, clrEditHasColor, clrEditable, clrMrsHeader, clrMrsSub, clrMrsOrder, clrFont
+
+    Dim lunch1 As Date, lunch2 As Date, hasLunch2 As Boolean, lunchDurDays As Double
+    Dim lunchDurMin As Double
+    lunchDurMin = CDbl(Val(wsIn.Range("B12").Value))
+    ParseLunchParams wsIn.Range("B10").Value, wsIn.Range("B11").Value, lunchDurMin, lunch1, lunch2, hasLunch2, lunchDurDays
+
     wsIn.Protect UW(49, 49, 52, 55, 48, 57)
 
     Application.ScreenUpdating = False
@@ -2091,28 +2169,30 @@ SkipDateRow:
 
                 ' Start date/time: per-worker chain (shift via ShiftStartOutOfLunch UDF)
                 Dim rawDT As String
-                rawDT = ""
                 If dictWorkerLastRow.Exists(curWID) Then
                     Dim prevR As Long
                     prevR = CLng(dictWorkerLastRow(curWID))
                     If Not dictWorkerSeenInOrder.Exists(curWID) Then
                         ' Cross-order: previous end + pause
-                        rawDT = "H" & prevR & "+I" & prevR & "+I" & pauseCellRow & "/1440"
+                        rawDT = "(H" & prevR & "+I" & prevR & "+I" & pauseCellRow & "/1440)"
                     Else
                         ' Within order: start = previous end for same worker
-                        rawDT = "H" & prevR & "+I" & prevR
+                        rawDT = "(H" & prevR & "+I" & prevR & ")"
                     End If
-                    wsMRS.Cells(outRow, 6).Formula = "=INT(ShiftStartOutOfLunch(" & rawDT & ",""12:00:00"",""00:00:00"",45))"
-                    wsMRS.Cells(outRow, 7).Formula = "=MOD(ShiftStartOutOfLunch(" & rawDT & ",""12:00:00"",""00:00:00"",45),1)"
+                    Dim shiftF As String
+                    shiftF = BuildLunchShiftFormulaStr(rawDT, lunch1, lunch2, lunchDurMin)
+                    wsMRS.Cells(outRow, 6).Formula = "=INT(" & shiftF & ")"
+                    wsMRS.Cells(outRow, 7).Formula = "=MOD(" & shiftF & ",1)"
                 Else
                     ' First time seeing this worker: parsed values (G editable, shift if in lunch)
                     wsMRS.Cells(outRow, 6).Value = arrSDate(idx)
                     Dim startTimeVal As Date
                     startTimeVal = arrSTime(idx)
-                    If CDbl(startTimeVal) >= CDbl(TimeSerial(12, 0, 0)) And CDbl(startTimeVal) < CDbl(TimeSerial(12, 45, 0)) Then
-                        startTimeVal = TimeSerial(12, 45, 0)
-                    End If
-                    wsMRS.Cells(outRow, 7).Value = startTimeVal
+                    Dim stFull As Date
+                    stFull = arrSDate(idx) + startTimeVal
+                    Dim stShifted As Date
+                    stShifted = ShiftStartOutOfLunch(stFull, lunch1, lunch2, hasLunch2, lunchDurDays)
+                    wsMRS.Cells(outRow, 7).Value = stShifted - Int(stShifted)
                     wsMRS.Cells(outRow, 7).Locked = False
                     If clrEditHasColor Then
                         wsMRS.Cells(outRow, 7).Interior.Color = clrEditable
@@ -2130,8 +2210,13 @@ SkipDateRow:
                 ' M = Расчетное мин (INPUT, editable) — initial value from parsed times
                 Dim initMin As Double
                 initMin = (CDbl(arrEDate(idx)) + CDbl(arrETime(idx)) - CDbl(arrSDate(idx)) - CDbl(arrSTime(idx))) * 1440
-                If CDbl(arrSTime(idx)) <= CDbl(TimeSerial(12, 0, 0)) And CDbl(arrETime(idx)) > CDbl(TimeSerial(12, 0, 0)) And arrSDate(idx) = arrEDate(idx) Then
-                    initMin = initMin - 45
+                If arrSDate(idx) = arrEDate(idx) Then
+                    If arrSTime(idx) <= lunch1 And arrETime(idx) > lunch1 Then
+                        initMin = initMin - lunchDurMin
+                    End If
+                    If hasLunch2 And arrSTime(idx) <= lunch2 And arrETime(idx) > lunch2 Then
+                        initMin = initMin - lunchDurMin
+                    End If
                 End If
                 If initMin < 0 Then initMin = 0
                 wsMRS.Cells(outRow, 13).NumberFormat = "0.00"
@@ -2145,28 +2230,23 @@ SkipDateRow:
                 End If
 
                 ' L = Расчетное час (formula from M)
-                Dim r As String: r = CStr(outRow)
-                wsMRS.Cells(outRow, 12).Formula = "=M" & r & "/60"
+                Dim rStr As String: rStr = CStr(outRow)
+                wsMRS.Cells(outRow, 12).Formula = "=M" & rStr & "/60"
                 wsMRS.Cells(outRow, 12).NumberFormat = "0.00"
 
                 ' H = End date (formula: start + duration + lunch)
                 ' I = End time (formula: start + duration + lunch)
-                ' lunch_adj = IF(AND(G<12:00, G+M/1440>12:00), 45/1440, 0)
-                Dim lunchF As String
-                lunchF = "IF(AND(G" & r & "<=TIME(12,0,0),G" & r & "+M" & r & "/1440>TIME(12,0,0)),45/1440,0)"
-                wsMRS.Cells(outRow, 8).Formula = "=INT(F" & r & "+G" & r & "+M" & r & "/1440+" & lunchF & ")"
+                Dim endD As String, endT As String
+                BuildEndFormulasStr "F" & rStr, "G" & rStr, "M" & rStr, "1440", lunch1, lunch2, lunchDurMin, endD, endT
+                wsMRS.Cells(outRow, 8).Formula = "=" & endD
                 wsMRS.Cells(outRow, 8).NumberFormat = "dd"".""mm"".""yyyy"
-                wsMRS.Cells(outRow, 9).Formula = "=MOD(G" & r & "+M" & r & "/1440+" & lunchF & ",1)"
+                wsMRS.Cells(outRow, 9).Formula = "=" & endT
                 wsMRS.Cells(outRow, 9).NumberFormat = "h:mm:ss"
 
                 ' N = Обед? (formula)
-                If rawDT <> "" Then
-                    ' Formula-based G: use raw (unshifted) datetime with LunchFlag UDF
-                    wsMRS.Cells(outRow, 14).Formula = "=LunchFlag(" & rawDT & "," & rawDT & "+M" & r & "/1440,""12:00:00"",""00:00:00"",45)"
-                Else
-                    ' Static G: check both cross-lunch and during-lunch via G
-                    wsMRS.Cells(outRow, 14).Formula = "=IF(OR(AND(G" & r & "<=TIME(12,0,0),G" & r & "+M" & r & "/1440>TIME(12,0,0)),AND(G" & r & ">=TIME(12,0,0),G" & r & "<=TIME(12,45,0))),""" & daStr & ""","""")"
-                End If
+                Dim iconF As String
+                iconF = BuildLunchIconFormulaStr("G" & rStr, "M" & rStr, "1440", lunch1, lunch2, lunchDurMin, daStr)
+                wsMRS.Cells(outRow, 14).Formula = "=" & iconF
 
                 wsMRS.Range(wsMRS.Cells(outRow, 2), wsMRS.Cells(outRow, 14)).Borders.LineStyle = xlContinuous
                 totalDur = totalDur + arrDur(idx)
