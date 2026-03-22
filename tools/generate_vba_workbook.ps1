@@ -11,6 +11,390 @@ function RU([int[]]$codes) {
 $vbaCode = @'
 Option Explicit
 
+' --- Color settings row constants (on ВВОД sheet) ---
+Private Const CLR_ROW_LOCKED As Long = 31
+Private Const CLR_ROW_EDITABLE As Long = 32
+Private Const CLR_ROW_MRS_HEADER As Long = 33
+Private Const CLR_ROW_MRS_SUBHEADER As Long = 34
+Private Const CLR_ROW_MRS_ORDER As Long = 35
+Private Const CLR_ROW_FONT As Long = 36
+Private Const CLR_COL As Long = 2  ' column B
+
+' --- Default colors ---
+Private Const CLR_DEF_LOCKED As Long = 15132415   ' RGB(255, 230, 230)
+Private Const CLR_DEF_MRS_HEADER As Long = 15189684  ' RGB(180, 198, 231)
+Private Const CLR_DEF_MRS_SUB As Long = 16768200     ' RGB(200, 220, 255)
+Private Const CLR_DEF_MRS_ORDER As Long = 13167560   ' RGB(200, 235, 200)
+Private Const CLR_DEF_FONT As Long = 0               ' RGB(0, 0, 0)
+
+Private Function ReadCellColor(ByVal cell As Range, ByVal defaultColor As Long) As Long
+    If cell.Interior.Pattern = xlNone Then
+        ReadCellColor = defaultColor
+    Else
+        ReadCellColor = cell.Interior.Color
+    End If
+End Function
+
+Private Sub ReadAllColors(ByVal wsIn As Worksheet, _
+    ByRef clrLocked As Long, ByRef clrLockedFont As Long, _
+    ByRef clrEditHasColor As Boolean, ByRef clrEditable As Long, _
+    ByRef clrMrsHeader As Long, ByRef clrMrsSub As Long, _
+    ByRef clrMrsOrder As Long, ByRef clrFont As Long)
+
+    clrLocked = ReadCellColor(wsIn.Cells(CLR_ROW_LOCKED, CLR_COL), CLR_DEF_LOCKED)
+    clrLockedFont = clrLocked
+
+    If wsIn.Cells(CLR_ROW_EDITABLE, CLR_COL).Interior.Pattern = xlNone Then
+        clrEditHasColor = False
+        clrEditable = 0
+    Else
+        clrEditHasColor = True
+        clrEditable = wsIn.Cells(CLR_ROW_EDITABLE, CLR_COL).Interior.Color
+    End If
+
+    clrMrsHeader = ReadCellColor(wsIn.Cells(CLR_ROW_MRS_HEADER, CLR_COL), CLR_DEF_MRS_HEADER)
+    clrMrsSub = ReadCellColor(wsIn.Cells(CLR_ROW_MRS_SUBHEADER, CLR_COL), CLR_DEF_MRS_SUB)
+    clrMrsOrder = ReadCellColor(wsIn.Cells(CLR_ROW_MRS_ORDER, CLR_COL), CLR_DEF_MRS_ORDER)
+    clrFont = ReadCellColor(wsIn.Cells(CLR_ROW_FONT, CLR_COL), CLR_DEF_FONT)
+End Sub
+
+Private Sub EnsureColorSettings(ByVal wsIn As Worksheet)
+    Dim r As Long
+    Dim prevEvents As Boolean
+    Dim errNum As Long
+    Dim errSource As String
+    Dim errDesc As String
+
+    prevEvents = Application.EnableEvents
+    Application.EnableEvents = False
+    On Error GoTo EH
+
+    ' Title (merged A30:B30)
+    wsIn.Cells(30, 1).Value = UW(1053, 1072, 1089, 1090, 1088, 1086, 1081, 1082, 1080, 32, 1062, 1074, 1077, 1090, 1086, 1074)
+    On Error Resume Next
+    wsIn.Range("A30:B30").Merge
+    wsIn.Cells(30, 1).Font.Bold = True
+    On Error GoTo 0
+
+    ' Labels
+    wsIn.Cells(CLR_ROW_LOCKED, 1).Value = UW(1047, 1072, 1073, 1083, 1086, 1082, 1080, 1088, 1086, 1074, 1072, 1085, 1085, 1099, 1077)
+    wsIn.Cells(CLR_ROW_EDITABLE, 1).Value = UW(1056, 1077, 1076, 1072, 1082, 1090, 1080, 1088, 1091, 1077, 1084, 1099, 1077)
+    wsIn.Cells(CLR_ROW_MRS_HEADER, 1).Value = UW(1055, 1072, 1088, 1089, 1080, 1085, 1075, 32, 77, 82, 83, 32, 1044, 1072, 1090, 1072)
+    wsIn.Cells(CLR_ROW_MRS_SUBHEADER, 1).Value = UW(1055, 1072, 1088, 1089, 1080, 1085, 1075, 32, 77, 82, 83, 32, 1041, 1088, 1080, 1075, 1072, 1076, 1072)
+    wsIn.Cells(CLR_ROW_MRS_ORDER, 1).Value = UW(1055, 1072, 1088, 1089, 1080, 1085, 1075, 32, 77, 82, 83, 32, 1047, 1072, 1082, 1072, 1079)
+    wsIn.Cells(CLR_ROW_FONT, 1).Value = UW(1062, 1074, 1077, 1090, 32, 1058, 1077, 1082, 1089, 1090, 1072)
+
+    ' Set default colors if cells have no fill
+    For r = CLR_ROW_LOCKED To CLR_ROW_FONT
+        wsIn.Cells(r, 1).Locked = True
+        wsIn.Cells(r, CLR_COL).Locked = False
+    Next r
+
+    If wsIn.Cells(CLR_ROW_LOCKED, CLR_COL).Interior.Pattern = xlNone Then
+        wsIn.Cells(CLR_ROW_LOCKED, CLR_COL).Interior.Color = CLR_DEF_LOCKED
+    End If
+    ' CLR_ROW_EDITABLE: xlNone by default (transparent) — leave as is
+    If wsIn.Cells(CLR_ROW_MRS_HEADER, CLR_COL).Interior.Pattern = xlNone Then
+        wsIn.Cells(CLR_ROW_MRS_HEADER, CLR_COL).Interior.Color = CLR_DEF_MRS_HEADER
+    End If
+    If wsIn.Cells(CLR_ROW_MRS_SUBHEADER, CLR_COL).Interior.Pattern = xlNone Then
+        wsIn.Cells(CLR_ROW_MRS_SUBHEADER, CLR_COL).Interior.Color = CLR_DEF_MRS_SUB
+    End If
+    If wsIn.Cells(CLR_ROW_MRS_ORDER, CLR_COL).Interior.Pattern = xlNone Then
+        wsIn.Cells(CLR_ROW_MRS_ORDER, CLR_COL).Interior.Color = CLR_DEF_MRS_ORDER
+    End If
+    If wsIn.Cells(CLR_ROW_FONT, CLR_COL).Interior.Pattern = xlNone Then
+        wsIn.Cells(CLR_ROW_FONT, CLR_COL).Interior.Color = CLR_DEF_FONT
+    End If
+    GoTo Cleanup
+
+EH:
+    errNum = Err.Number
+    errSource = Err.Source
+    errDesc = Err.Description
+
+Cleanup:
+    Application.EnableEvents = prevEvents
+    If errNum <> 0 Then
+        Err.Raise errNum, errSource, errDesc
+    End If
+End Sub
+
+Private Sub ApplyLockedStyle(ByVal rng As Range, ByVal clrLocked As Long, ByVal clrLockedFont As Long)
+    rng.Interior.Color = clrLocked
+    rng.Font.Color = clrLockedFont
+End Sub
+
+Private Sub ApplyEditableStyle(ByVal rng As Range, ByVal clrEditHasColor As Boolean, ByVal clrEditable As Long, ByVal clrFont As Long)
+    If clrEditHasColor Then
+        rng.Interior.Color = clrEditable
+    Else
+        rng.Interior.Pattern = xlNone
+    End If
+    rng.Font.Color = clrFont
+End Sub
+
+Public Function BuildColorSettingsSignature(ByVal wsIn As Worksheet) As String
+    Dim r As Long
+    Dim cell As Range
+
+    For r = CLR_ROW_LOCKED To CLR_ROW_FONT
+        Set cell = wsIn.Cells(r, CLR_COL)
+        BuildColorSettingsSignature = BuildColorSettingsSignature & "|" & _
+            CStr(cell.Interior.Pattern) & ":" & _
+            CStr(cell.Interior.Color) & ":" & _
+            CStr(cell.Font.Color)
+    Next r
+End Function
+
+Private Function LastContentRow(ByVal ws As Worksheet, Optional ByVal minRow As Long = 1) As Long
+    Dim lastCell As Range
+
+    On Error Resume Next
+    Set lastCell = ws.Cells.Find(What:="*", After:=ws.Cells(1, 1), LookIn:=xlFormulas, _
+        LookAt:=xlPart, SearchOrder:=xlByRows, SearchDirection:=xlPrevious, MatchCase:=False)
+    On Error GoTo 0
+
+    If lastCell Is Nothing Then
+        LastContentRow = minRow
+    Else
+        LastContentRow = lastCell.Row
+        If LastContentRow < minRow Then LastContentRow = minRow
+    End If
+End Function
+
+Private Function BuildRowBoundRange(ByVal ws As Worksheet, ByVal firstRow As Long, _
+    ByVal firstCol As Long, ByVal lastCol As Long, Optional ByVal minLastRow As Long = 1) As Range
+
+    Dim lastRow As Long
+    lastRow = LastContentRow(ws, minLastRow)
+    If lastRow < firstRow Then lastRow = firstRow
+
+    Set BuildRowBoundRange = ws.Range(ws.Cells(firstRow, firstCol), ws.Cells(lastRow, lastCol))
+End Function
+
+Private Sub SyncPauseInputCell(ByVal wsIn As Worksheet, ByVal wsHist As Worksheet, _
+    ByVal clrLocked As Long, ByVal clrLockedFont As Long, _
+    ByVal clrEditHasColor As Boolean, ByVal clrEditable As Long, ByVal clrFont As Long)
+
+    Dim histLastRow As Long
+    histLastRow = wsHist.Cells(wsHist.Rows.Count, 2).End(xlUp).Row
+
+    If histLastRow <= 1 Then
+        wsIn.Cells(4, 13).Locked = True
+        ApplyLockedStyle wsIn.Cells(4, 13), clrLocked, clrLockedFont
+    Else
+        wsIn.Cells(4, 13).Locked = False
+        ApplyEditableStyle wsIn.Cells(4, 13), clrEditHasColor, clrEditable, clrFont
+    End If
+    wsIn.Cells(4, 13).Borders.LineStyle = xlContinuous
+End Sub
+
+Private Sub RefreshInputSheetColors(ByVal wsIn As Worksheet, ByVal wsHist As Worksheet, _
+    ByVal clrLocked As Long, ByVal clrLockedFont As Long, _
+    ByVal clrEditHasColor As Boolean, ByVal clrEditable As Long, _
+    ByVal clrMrsHeader As Long, ByVal clrMrsSub As Long, _
+    ByVal clrMrsOrder As Long, ByVal clrFont As Long)
+
+    Dim workerCount As Long, opCount As Long
+
+    wsIn.Cells.Interior.Color = clrLocked
+    wsIn.Cells.Font.Color = clrFont
+
+    ApplyEditableStyle wsIn.Range("B3:B17"), clrEditHasColor, clrEditable, clrFont
+    wsIn.Range("B3:B17").Borders.LineStyle = xlContinuous
+    ApplyEditableStyle wsIn.Range("L4"), clrEditHasColor, clrEditable, clrFont
+    ApplyEditableStyle wsIn.Range("N4"), clrEditHasColor, clrEditable, clrFont
+    wsIn.Range("L4").Borders.LineStyle = xlContinuous
+    wsIn.Range("N4").Borders.LineStyle = xlContinuous
+
+    wsIn.Cells(CLR_ROW_LOCKED, CLR_COL).Interior.Color = clrLocked
+    If clrEditHasColor Then
+        wsIn.Cells(CLR_ROW_EDITABLE, CLR_COL).Interior.Color = clrEditable
+    Else
+        wsIn.Cells(CLR_ROW_EDITABLE, CLR_COL).Interior.Pattern = xlNone
+    End If
+    wsIn.Cells(CLR_ROW_MRS_HEADER, CLR_COL).Interior.Color = clrMrsHeader
+    wsIn.Cells(CLR_ROW_MRS_SUBHEADER, CLR_COL).Interior.Color = clrMrsSub
+    wsIn.Cells(CLR_ROW_MRS_ORDER, CLR_COL).Interior.Color = clrMrsOrder
+    wsIn.Cells(CLR_ROW_FONT, CLR_COL).Interior.Color = clrFont
+
+    workerCount = CLng(Val(wsIn.Range("B9").Value))
+    If workerCount < 1 Then workerCount = 1
+    If workerCount > 10 Then workerCount = 10
+    SyncWorkerIdInputs wsIn, workerCount
+
+    opCount = CLng(Val(wsIn.Range("B8").Value))
+    If opCount < 1 Then opCount = 1
+    If opCount > 20 Then opCount = 20
+    SyncOperationRows wsIn, opCount
+
+    SyncPauseInputCell wsIn, wsHist, clrLocked, clrLockedFont, clrEditHasColor, clrEditable, clrFont
+End Sub
+
+Private Sub RefreshResultSheetColors(ByVal wsOut As Worksheet, ByVal clrLocked As Long, ByVal clrFont As Long)
+    wsOut.Cells.Interior.Color = clrLocked
+    wsOut.Cells.Font.Color = clrFont
+End Sub
+
+Private Sub RefreshHistorySheetColors(ByVal wsHist As Worksheet, ByVal clrLocked As Long, _
+    ByVal clrEditHasColor As Boolean, ByVal clrEditable As Long, ByVal clrFont As Long)
+
+    Dim lastRow As Long, r As Long, idx As Long
+    Dim editCols As Variant
+
+    lastRow = LastContentRow(wsHist, 1)
+    wsHist.Cells.Interior.Color = clrLocked
+    wsHist.Cells.Font.Color = clrFont
+
+    editCols = Array(5, 7, 12, 16, 18, 19)
+    For idx = LBound(editCols) To UBound(editCols)
+        For r = 2 To lastRow
+            If Not wsHist.Cells(r, editCols(idx)).Locked Then
+                ApplyEditableStyle wsHist.Cells(r, editCols(idx)), clrEditHasColor, clrEditable, clrFont
+            End If
+        Next r
+    Next idx
+End Sub
+
+Private Sub RefreshMRSSheetColors(ByVal wsMRS As Worksheet, ByVal clrLocked As Long, _
+    ByVal clrEditHasColor As Boolean, ByVal clrEditable As Long, _
+    ByVal clrMrsHeader As Long, ByVal clrMrsSub As Long, _
+    ByVal clrMrsOrder As Long, ByVal clrFont As Long)
+
+    Dim lastRow As Long, r As Long, idx As Long
+    Dim editCols As Variant
+
+    lastRow = LastContentRow(wsMRS, 1)
+    wsMRS.Cells.Interior.Color = clrLocked
+    wsMRS.Cells.Font.Color = clrFont
+
+    For r = 1 To lastRow
+        If wsMRS.Cells(r, 2).Font.Size = 18 Then
+            wsMRS.Range(wsMRS.Cells(r, 2), wsMRS.Cells(r, 14)).Interior.Color = clrMrsHeader
+        ElseIf wsMRS.Cells(r, 2).Font.Size = 16 Then
+            wsMRS.Range(wsMRS.Cells(r, 2), wsMRS.Cells(r, 14)).Interior.Color = clrMrsSub
+        ElseIf wsMRS.Cells(r, 2).Font.Size = 15 Then
+            wsMRS.Range(wsMRS.Cells(r, 2), wsMRS.Cells(r, 14)).Interior.Color = clrMrsOrder
+        End If
+    Next r
+
+    editCols = Array(7, 9, 13)
+    For idx = LBound(editCols) To UBound(editCols)
+        For r = 3 To lastRow
+            If Not wsMRS.Cells(r, editCols(idx)).Locked Then
+                ApplyEditableStyle wsMRS.Cells(r, editCols(idx)), clrEditHasColor, clrEditable, clrFont
+            End If
+        Next r
+    Next idx
+End Sub
+
+Private Sub SetRangeBoldSafe(ByVal target As Range, ByVal isBold As Boolean, Optional ByVal tag As String = "")
+    Dim cell As Range
+
+    On Error GoTo EH
+    For Each cell In target.Cells
+        If cell.MergeCells Then
+            If cell.Address = cell.MergeArea.Cells(1, 1).Address Then
+                cell.Font.Bold = isBold
+            End If
+        Else
+            cell.Font.Bold = isBold
+        End If
+    Next cell
+    Exit Sub
+
+EH:
+    Err.Raise Err.Number, "SetRangeBoldSafe", "Bold stage '" & tag & "' at " & cell.Address(False, False) & ": " & Err.Description
+End Sub
+
+Private Sub SetCellBoldSafe(ByVal target As Range, ByVal isBold As Boolean, Optional ByVal tag As String = "")
+    On Error GoTo EH
+    If target.MergeCells Then
+        target.MergeArea.Cells(1, 1).Font.Bold = isBold
+    Else
+        target.Font.Bold = isBold
+    End If
+    Exit Sub
+
+EH:
+    Err.Raise Err.Number, "SetCellBoldSafe", "Bold stage '" & tag & "' at " & target.Address(False, False) & ": " & Err.Description
+End Sub
+
+Public Sub RefreshWorkbookColors()
+    On Error GoTo EH
+
+    Dim wsIn As Worksheet, wsOut As Worksheet, wsHist As Worksheet, wsMRS As Worksheet
+    Set wsIn = ThisWorkbook.Worksheets(1)
+    Set wsOut = ThisWorkbook.Worksheets(2)
+    Set wsHist = ThisWorkbook.Worksheets(3)
+    Set wsMRS = ThisWorkbook.Worksheets(4)
+
+    Dim clrLocked As Long, clrLockedFont As Long
+    Dim clrEditHasColor As Boolean, clrEditable As Long
+    Dim clrMrsHeader As Long, clrMrsSub As Long, clrMrsOrder As Long, clrFont As Long
+
+    Application.EnableEvents = False
+    wsIn.Unprotect UW(49, 49, 52, 55, 48, 57)
+    wsOut.Unprotect UW(49, 49, 52, 55, 48, 57)
+    wsHist.Unprotect UW(49, 49, 52, 55, 48, 57)
+    wsMRS.Unprotect UW(49, 49, 52, 55, 48, 57)
+
+    EnsureColorSettings wsIn
+    ReadAllColors wsIn, clrLocked, clrLockedFont, clrEditHasColor, clrEditable, clrMrsHeader, clrMrsSub, clrMrsOrder, clrFont
+
+    RefreshInputSheetColors wsIn, wsHist, clrLocked, clrLockedFont, clrEditHasColor, clrEditable, clrMrsHeader, clrMrsSub, clrMrsOrder, clrFont
+    RefreshResultSheetColors wsOut, clrLocked, clrFont
+    RefreshHistorySheetColors wsHist, clrLocked, clrEditHasColor, clrEditable, clrFont
+    RefreshMRSSheetColors wsMRS, clrLocked, clrEditHasColor, clrEditable, clrMrsHeader, clrMrsSub, clrMrsOrder, clrFont
+
+Cleanup:
+    On Error Resume Next
+    wsIn.Protect UW(49, 49, 52, 55, 48, 57)
+    wsOut.Protect UW(49, 49, 52, 55, 48, 57)
+    wsHist.Protect UW(49, 49, 52, 55, 48, 57)
+    wsMRS.Protect UW(49, 49, 52, 55, 48, 57)
+    Application.EnableEvents = True
+    Exit Sub
+EH:
+    Resume Cleanup
+End Sub
+
+Private Sub PickCellColor(ByVal rowNum As Long)
+    Dim wsIn As Worksheet
+    Dim changed As Boolean
+    Set wsIn = ThisWorkbook.Worksheets(UW(1042, 1074, 1086, 1076))
+    wsIn.Unprotect UW(49, 49, 52, 55, 48, 57)
+    wsIn.Cells(rowNum, CLR_COL).Select
+    changed = Application.Dialogs(xlDialogPatterns).Show
+    wsIn.Protect UW(49, 49, 52, 55, 48, 57)
+    If changed Then RefreshWorkbookColors
+End Sub
+
+Public Sub PickColorLocked()
+    PickCellColor CLR_ROW_LOCKED
+End Sub
+
+Public Sub PickColorEditable()
+    PickCellColor CLR_ROW_EDITABLE
+End Sub
+
+Public Sub PickColorMrsHeader()
+    PickCellColor CLR_ROW_MRS_HEADER
+End Sub
+
+Public Sub PickColorMrsSub()
+    PickCellColor CLR_ROW_MRS_SUBHEADER
+End Sub
+
+Public Sub PickColorMrsOrder()
+    PickCellColor CLR_ROW_MRS_ORDER
+End Sub
+
+Public Sub PickColorFont()
+    PickCellColor CLR_ROW_FONT
+End Sub
+
 Private Function UW(ParamArray codes() As Variant) As String
     Dim i As Long
     For i = LBound(codes) To UBound(codes)
@@ -24,14 +408,14 @@ Private Function ZQ() As Boolean
     Dim v As String
     v = Trim$(CStr(ThisWorkbook.Worksheets(1).Range(UW(65, 49)).Value))
     If Len(v) < 2 Then Exit Function
-    Dim eC As Variant
-    eC = Array(181,239,280,309,329,208,218,268,306,353,198,179,257,274,310,129, _
-               1177,1243,1291,1325,1181,1213,1274,1293,1331,1171,166,1214,254, _
-               1301,143,166,221,256,295,151)
-    If UBound(eC) - LBound(eC) + 1 <> Len(v) Then Exit Function
+    Dim ec As Variant
+    ec = Array(181, 239, 280, 309, 329, 208, 218, 268, 306, 353, 198, 179, 257, 274, 310, 129, _
+               1177, 1243, 1291, 1325, 1181, 1213, 1274, 1293, 1331, 1171, 166, 1214, 254, _
+               1301, 143, 166, 221, 256, 295, 151)
+    If UBound(ec) - LBound(ec) + 1 <> Len(v) Then Exit Function
     Dim xV As String, j As Long
-    For j = LBound(eC) To UBound(eC)
-        xV = xV & ChrW(CLng(eC(j)) - (97 + (j Mod 5) * 37))
+    For j = LBound(ec) To UBound(ec)
+        xV = xV & ChrW(CLng(ec(j)) - (97 + (j Mod 5) * 37))
     Next j
     ZQ = (StrComp(v, xV, vbBinaryCompare) = 0)
 End Function
@@ -42,7 +426,7 @@ End Function
 
 Public Sub GenerateAndAppendHistory()
     If Not ZQ() Then
-        MsgBox UW(1054,1096,1080,1073,1082,1072,33), vbCritical
+        MsgBox UW(1054, 1096, 1080, 1073, 1082, 1072, 33), vbCritical
         Exit Sub
     End If
     On Error GoTo EH
@@ -52,22 +436,28 @@ Public Sub GenerateAndAppendHistory()
     Set wsOut = ThisWorkbook.Worksheets(2)
     Set wsHist = ThisWorkbook.Worksheets(3)
 
-    wsIn.Unprotect UW(49,49,52,55,48,57)
-    wsOut.Unprotect UW(49,49,52,55,48,57)
-    wsHist.Unprotect UW(49,49,52,55,48,57)
+    wsIn.Unprotect UW(49, 49, 52, 55, 48, 57)
+    wsOut.Unprotect UW(49, 49, 52, 55, 48, 57)
+    wsHist.Unprotect UW(49, 49, 52, 55, 48, 57)
     Application.EnableEvents = False
 
-    ClearResultArea wsOut
+    EnsureColorSettings wsIn
+    Dim clrLocked As Long, clrLockedFont As Long
+    Dim clrEditHasColor As Boolean, clrEditable As Long
+    Dim clrMrsHeader As Long, clrMrsSub As Long, clrMrsOrder As Long, clrFont As Long
+    ReadAllColors wsIn, clrLocked, clrLockedFont, clrEditHasColor, clrEditable, clrMrsHeader, clrMrsSub, clrMrsOrder, clrFont
+
+    ClearResultArea wsOut, clrLocked, clrFont
     EnsureSheetHeaders wsOut, wsHist
 
     Dim primaryIsMin As Boolean
     primaryIsMin = (NormalizeUnit(wsIn.Cells(4, 12).Value) <> "hour")
     If primaryIsMin Then
-        wsOut.Cells(1, 12).Value = UW(1056,1072,1073,1086,1090,1072,32,40,1084,1080,1085,41)
-        wsOut.Cells(1, 6).Value = UW(1056,1072,1073,1086,1090,1072,32,40,1095,1072,1089,41)
+        wsOut.Cells(1, 12).Value = UW(1056, 1072, 1073, 1086, 1090, 1072, 32, 40, 1084, 1080, 1085, 41)
+        wsOut.Cells(1, 6).Value = UW(1056, 1072, 1073, 1086, 1090, 1072, 32, 40, 1095, 1072, 1089, 41)
     Else
-        wsOut.Cells(1, 12).Value = UW(1056,1072,1073,1086,1090,1072,32,40,1095,1072,1089,41)
-        wsOut.Cells(1, 6).Value = UW(1056,1072,1073,1086,1090,1072,32,40,1084,1080,1085,41)
+        wsOut.Cells(1, 12).Value = UW(1056, 1072, 1073, 1086, 1090, 1072, 32, 40, 1095, 1072, 1089, 41)
+        wsOut.Cells(1, 6).Value = UW(1056, 1072, 1073, 1086, 1090, 1072, 32, 40, 1084, 1080, 1085, 41)
     End If
 
     Dim startDate As Date, startTime As Date, postingDate As Date
@@ -76,14 +466,14 @@ Public Sub GenerateAndAppendHistory()
     postingDate = CDate(wsIn.Range("B7").Value)
 
     Dim workerCount As Long
-    workerCount = CLng(Val(wsIn.Range("B9").Value))
+    workerCount = CLng(val(wsIn.Range("B9").Value))
     If workerCount < 1 Then workerCount = 1
     If workerCount > 10 Then workerCount = 10
     SyncWorkerIdInputs wsIn, workerCount
 
     Dim lunch1 As Date, lunch2 As Date, hasLunch2 As Boolean
     Dim lunchDurMin As Double, lunchDurDays As Double
-    lunchDurMin = CDbl(Val(wsIn.Range("B12").Value))
+    lunchDurMin = CDbl(val(wsIn.Range("B12").Value))
     ParseLunchParams wsIn.Range("B10").Value, wsIn.Range("B11").Value, lunchDurMin, lunch1, lunch2, hasLunch2, lunchDurDays
 
     Dim zStatus As String, zExtra As String, zRec As String, zRiz As String, zK As String
@@ -93,9 +483,9 @@ Public Sub GenerateAndAppendHistory()
     zRiz = NormalizeRizInput(CStr(wsIn.Range("B16").Value))
     zK = NormalizeKInput(CStr(wsIn.Range("B17").Value))
 
-    If zStatus = "" Then zStatus = UW(1079,1072,1084,1077,1095,1072,1085,1080,1081,32,1085,1077,1090)
-    If zExtra = "" Then zExtra = UW(1085,1077,1090)
-    If zRec = "" Then zRec = UW(1085,1077,1090)
+    If zStatus = "" Then zStatus = UW(1079, 1072, 1084, 1077, 1095, 1072, 1085, 1080, 1081, 32, 1085, 1077, 1090)
+    If zExtra = "" Then zExtra = UW(1085, 1077, 1090)
+    If zRec = "" Then zRec = UW(1085, 1077, 1090)
 
     Dim baseStart As Date
     baseStart = startDate + startTime
@@ -115,12 +505,12 @@ Public Sub GenerateAndAppendHistory()
         opNum = opNum + 1
 
         Dim durVal As Double, durUnit As String
-        durVal = CDbl(Val(wsIn.Cells(opRow, 11).Value))
+        durVal = CDbl(val(wsIn.Cells(opRow, 11).Value))
         If durVal < 0 Then durVal = 0
         durUnit = NormalizeUnit(wsIn.Cells(opRow, 12).Value)
 
         Dim breakVal As Double, breakUnit As String
-        breakVal = CDbl(Val(wsIn.Cells(opRow, 13).Value))
+        breakVal = CDbl(val(wsIn.Cells(opRow, 13).Value))
         If breakVal < 0 Then breakVal = 0
         breakUnit = NormalizeUnit(wsIn.Cells(opRow, 14).Value)
 
@@ -211,7 +601,7 @@ Public Sub GenerateAndAppendHistory()
                 wsOut.Cells(outRow, 21).Value = CDbl(endDT) - Int(CDbl(endDT))
 
                 If crossed Then
-                    wsOut.Cells(outRow, 4).Value = UW(1044,1040)
+                    wsOut.Cells(outRow, 4).Value = UW(1044, 1040)
                 Else
                     wsOut.Cells(outRow, 4).Value = ""
                 End If
@@ -230,7 +620,7 @@ Public Sub GenerateAndAppendHistory()
     Loop
 
     If opNum = 0 Then
-        MsgBox UW(1053,1077,32,1085,1072,1081,1076,1077,1085,1099,32,1086,1087,1077,1088,1072,1094,1080,1080,32,1074,32,1042,1074,1086,1076,33,72,52,58,72,53,48,48), vbExclamation
+        MsgBox UW(1053, 1077, 32, 1085, 1072, 1081, 1076, 1077, 1085, 1099, 32, 1086, 1087, 1077, 1088, 1072, 1094, 1080, 1080, 32, 1074, 32, 1042, 1074, 1086, 1076, 33, 72, 52, 58, 72, 53, 48, 48), vbExclamation
         Exit Sub
     End If
 
@@ -254,11 +644,11 @@ Public Sub GenerateAndAppendHistory()
     Dim zRow As Long, zr As Long
     zRow = outRow + 1
     wsOut.Cells(zRow, 2).Value = "Z7"
-    wsOut.Cells(zRow + 1, 2).Value = "1. " & UW(1089,1086,1089,1090,1086,1103,1085,1080,1077,32,1086,1073,1098,1077,1082,1090,1072,32,1088,1077,1084,1086,1085,1090,1072,32,1076,1086,32,1085,1072,1095,1072,1083,1072,32,1088,1072,1073,1086,1090) & ": " & zStatus
-    wsOut.Cells(zRow + 2, 2).Value = "2. " & UW(1074,1099,1087,1086,1083,1085,1077,1085,1085,1099,1077,32,1088,1072,1073,1086,1090,1099,32,1074,32,1088,1072,1084,1082,1072,1093,32,1087,1083,1072,1085,1086,1074,1086,1075,1086,32,1086,1073,1098,1105,1084,1072,32,1088,1072,1073,1086,1090) & ": " & JoinOperationNames(wsOut, 2, outRow - 1)
-    wsOut.Cells(zRow + 3, 2).Value = "3. " & UW(1074,1099,1087,1086,1083,1085,1077,1085,1085,1099,1077,32,1088,1072,1073,1086,1090,1099,32,1074,32,1088,1072,1084,1082,1072,1093,32,1076,1086,1087,1086,1083,1085,1080,1090,1077,1083,1100,1085,1086,1075,1086,32,1086,1073,1098,1105,1084,1072,32,1088,1072,1073,1086,1090) & ": " & zExtra
-    wsOut.Cells(zRow + 4, 2).Value = "4. " & UW(1088,1077,1079,1091,1083,1100,1090,1072,1090,1099,32,1080,1089,1087,1099,1090,1072,1085,1080,1081,44,32,1090,1077,1089,1090,1086,1074,44,32,1079,1072,1084,1077,1088,1086,1074,44,32,1080,1085,1089,1087,1077,1082,1094,1080,1081) & ": R" & UW(1080,1079) & "=" & zRiz & " K=" & zK
-    wsOut.Cells(zRow + 5, 2).Value = "5. " & UW(1086,1090,1082,1083,1086,1085,1077,1085,1080,1103,32,1086,1090,32,1058,1050,32,1080,32,1088,1077,1082,1086,1084,1077,1085,1076,1072,1094,1080,1080,32,1087,1086,32,1082,1086,1088,1088,1077,1082,1090,1080,1088,1086,1074,1082,1077,32,1058,1050) & ": " & zRec
+    wsOut.Cells(zRow + 1, 2).Value = "1. " & UW(1089, 1086, 1089, 1090, 1086, 1103, 1085, 1080, 1077, 32, 1086, 1073, 1098, 1077, 1082, 1090, 1072, 32, 1088, 1077, 1084, 1086, 1085, 1090, 1072, 32, 1076, 1086, 32, 1085, 1072, 1095, 1072, 1083, 1072, 32, 1088, 1072, 1073, 1086, 1090) & ": " & zStatus
+    wsOut.Cells(zRow + 2, 2).Value = "2. " & UW(1074, 1099, 1087, 1086, 1083, 1085, 1077, 1085, 1085, 1099, 1077, 32, 1088, 1072, 1073, 1086, 1090, 1099, 32, 1074, 32, 1088, 1072, 1084, 1082, 1072, 1093, 32, 1087, 1083, 1072, 1085, 1086, 1074, 1086, 1075, 1086, 32, 1086, 1073, 1098, 1105, 1084, 1072, 32, 1088, 1072, 1073, 1086, 1090) & ": " & JoinOperationNames(wsOut, 2, outRow - 1)
+    wsOut.Cells(zRow + 3, 2).Value = "3. " & UW(1074, 1099, 1087, 1086, 1083, 1085, 1077, 1085, 1085, 1099, 1077, 32, 1088, 1072, 1073, 1086, 1090, 1099, 32, 1074, 32, 1088, 1072, 1084, 1082, 1072, 1093, 32, 1076, 1086, 1087, 1086, 1083, 1085, 1080, 1090, 1077, 1083, 1100, 1085, 1086, 1075, 1086, 32, 1086, 1073, 1098, 1105, 1084, 1072, 32, 1088, 1072, 1073, 1086, 1090) & ": " & zExtra
+    wsOut.Cells(zRow + 4, 2).Value = "4. " & UW(1088, 1077, 1079, 1091, 1083, 1100, 1090, 1072, 1090, 1099, 32, 1080, 1089, 1087, 1099, 1090, 1072, 1085, 1080, 1081, 44, 32, 1090, 1077, 1089, 1090, 1086, 1074, 44, 32, 1079, 1072, 1084, 1077, 1088, 1086, 1074, 44, 32, 1080, 1085, 1089, 1087, 1077, 1082, 1094, 1080, 1081) & ": R" & UW(1080, 1079) & "=" & zRiz & " K=" & zK
+    wsOut.Cells(zRow + 5, 2).Value = "5. " & UW(1086, 1090, 1082, 1083, 1086, 1085, 1077, 1085, 1080, 1103, 32, 1086, 1090, 32, 1058, 1050, 32, 1080, 32, 1088, 1077, 1082, 1086, 1084, 1077, 1085, 1076, 1072, 1094, 1080, 1080, 32, 1087, 1086, 32, 1082, 1086, 1088, 1088, 1077, 1082, 1090, 1080, 1088, 1086, 1074, 1082, 1077, 32, 1058, 1050) & ": " & zRec
 
     For zr = zRow To zRow + 5
         wsOut.Range(wsOut.Cells(zr, 2), wsOut.Cells(zr, 22)).Merge
@@ -268,7 +658,9 @@ Public Sub GenerateAndAppendHistory()
         wsOut.Range(wsOut.Cells(zr, 2), wsOut.Cells(zr, 22)).WrapText = True
     Next zr
 
-    AppendResultToHistory wsHist, wsOut, wsIn, outRow - 1, zRow + 5, workerCount, lunch1, lunch2, lunchDurMin, primaryIsMin
+    AppendResultToHistory wsHist, wsOut, wsIn, outRow - 1, zRow + 5, workerCount, lunch1, lunch2, lunchDurMin, primaryIsMin, clrEditHasColor, clrEditable, clrFont
+    RefreshResultSheetColors wsOut, clrLocked, clrFont
+    RefreshHistorySheetColors wsHist, clrLocked, clrEditHasColor, clrEditable, clrFont
 
     Dim chainEnd As Date, ceRow As Long
     chainEnd = 0
@@ -282,17 +674,17 @@ Public Sub GenerateAndAppendHistory()
     wsIn.Range("B5").NumberFormat = "dd"".""mm"".""yyyy"
     wsIn.Range("B6").NumberFormat = "hh:mm:ss"
 
-    MsgBox UW(1043,1086,1090,1086,1074,1086,46,32,1057,1092,1086,1088,1084,1080,1088,1086,1074,1072,1085,1086,32,1057,1090,1088,1086,1082,58,32) & (outRow - 2), vbInformation
+    MsgBox UW(1043, 1086, 1090, 1086, 1074, 1086, 46, 32, 1057, 1092, 1086, 1088, 1084, 1080, 1088, 1086, 1074, 1072, 1085, 1086, 32, 1057, 1090, 1088, 1086, 1082, 58, 32) & (outRow - 2), vbInformation
 
     Dim errMsg As String
-CleanUp:
+Cleanup:
     On Error Resume Next
-    wsOut.Protect UW(49,49,52,55,48,57)
-    wsHist.Protect UW(49,49,52,55,48,57)
+    wsOut.Protect UW(49, 49, 52, 55, 48, 57)
+    wsHist.Protect UW(49, 49, 52, 55, 48, 57)
     Application.EnableEvents = True
     wsIn.Cells(4, 13).Locked = False
-    wsIn.Cells(4, 13).Interior.Pattern = xlNone
-    wsIn.Protect UW(49,49,52,55,48,57)
+    ApplyEditableStyle wsIn.Cells(4, 13), clrEditHasColor, clrEditable, clrFont
+    wsIn.Protect UW(49, 49, 52, 55, 48, 57)
     On Error GoTo 0
     If Len(errMsg) > 0 Then
         MsgBox "Error: " & errMsg, vbCritical
@@ -301,85 +693,110 @@ CleanUp:
 
 EH:
     errMsg = Err.Description
-    Resume CleanUp
+    Resume Cleanup
 End Sub
 
 Private Sub EnsureSheetHeaders(ByVal wsOut As Worksheet, ByVal wsHist As Worksheet)
     wsOut.Cells(1, 1).Value = ""
     wsOut.Cells(1, 2).Value = UW(8470)
-    wsOut.Cells(1, 3).Value = UW(1054,1087,1077,1088,1072,1094,1080,1103)
-    wsOut.Cells(1, 4).Value = UW(1054,1073,1077,1076,63)
-    wsOut.Cells(1, 5).Value = UW(1055,1072,1091,1079,1072)
-    wsOut.Cells(1, 6).Value = UW(1056,1072,1073,1086,1090,1072,32,40,1095,1072,1089,41)
-    wsOut.Cells(1, 7).Value = UW(1055,1044,1058,1042)
+    wsOut.Cells(1, 3).Value = UW(1054, 1087, 1077, 1088, 1072, 1094, 1080, 1103)
+    wsOut.Cells(1, 4).Value = UW(1054, 1073, 1077, 1076, 63)
+    wsOut.Cells(1, 5).Value = UW(1055, 1072, 1091, 1079, 1072)
+    wsOut.Cells(1, 6).Value = UW(1056, 1072, 1073, 1086, 1090, 1072, 32, 40, 1095, 1072, 1089, 41)
+    wsOut.Cells(1, 7).Value = UW(1055, 1044, 1058, 1042)
     wsOut.Cells(1, 8).Value = "-"
     wsOut.Cells(1, 9).Value = "-"
     wsOut.Cells(1, 10).Value = "-"
     wsOut.Cells(1, 11).Value = "-"
-    wsOut.Cells(1, 12).Value = UW(1056,1072,1073,1086,1090,1072,32,40,1084,1080,1085,41)
+    wsOut.Cells(1, 12).Value = UW(1056, 1072, 1073, 1086, 1090, 1072, 32, 40, 1084, 1080, 1085, 41)
     wsOut.Cells(1, 13).Value = "-"
     wsOut.Cells(1, 14).Value = "-"
-    wsOut.Cells(1, 15).Value = UW(1044,1072,1090,1072,32,1087,1088,1086,1074,1086,1076,1082,1080)
-    wsOut.Cells(1, 16).Value = UW(1048,1089,1087,1086,1083,1085,1080,1090,1077,1083,1100)
+    wsOut.Cells(1, 15).Value = UW(1044, 1072, 1090, 1072, 32, 1087, 1088, 1086, 1074, 1086, 1076, 1082, 1080)
+    wsOut.Cells(1, 16).Value = UW(1048, 1089, 1087, 1086, 1083, 1085, 1080, 1090, 1077, 1083, 1100)
     wsOut.Cells(1, 17).Value = "-"
-    wsOut.Cells(1, 18).Value = UW(1044,1072,1090,1072,32,1053,1072,1095,1072,1083,1072)
-    wsOut.Cells(1, 19).Value = UW(1042,1088,1077,1084,1103,32,1053,1072,1095,1072,1083,1072)
-    wsOut.Cells(1, 20).Value = UW(1044,1072,1090,1072,32,1050,1086,1085,1094,1072)
-    wsOut.Cells(1, 21).Value = UW(1042,1088,1077,1084,1103,32,1050,1086,1085,1094,1072)
+    wsOut.Cells(1, 18).Value = UW(1044, 1072, 1090, 1072, 32, 1053, 1072, 1095, 1072, 1083, 1072)
+    wsOut.Cells(1, 19).Value = UW(1042, 1088, 1077, 1084, 1103, 32, 1053, 1072, 1095, 1072, 1083, 1072)
+    wsOut.Cells(1, 20).Value = UW(1044, 1072, 1090, 1072, 32, 1050, 1086, 1085, 1094, 1072)
+    wsOut.Cells(1, 21).Value = UW(1042, 1088, 1077, 1084, 1103, 32, 1050, 1086, 1085, 1094, 1072)
     wsOut.Cells(1, 22).Value = "INDEX"
     wsOut.Range("A1:V1").Font.Bold = True
 
-    wsHist.Cells(1, 2).Value = UW(1048,1089,1090,1086,1088,1080,1103)
+    wsHist.Cells(1, 2).Value = UW(1048, 1089, 1090, 1086, 1088, 1080, 1103)
     wsHist.Cells(1, 2).Font.Bold = True
 End Sub
 
 Public Sub ClearResultAndHistory()
     If Not ZQ() Then
-        MsgBox UW(1054,1096,1080,1073,1082,1072,33), vbCritical
+        MsgBox UW(1054, 1096, 1080, 1073, 1082, 1072, 33), vbCritical
         Exit Sub
     End If
-    On Error Resume Next
-    Dim wsR As Worksheet, wsH As Worksheet
+    On Error GoTo EH
+    Dim wsIn As Worksheet, wsR As Worksheet, wsH As Worksheet
+    Set wsIn = ThisWorkbook.Worksheets(1)
     Set wsR = ThisWorkbook.Worksheets(2)
     Set wsH = ThisWorkbook.Worksheets(3)
-    wsR.Unprotect UW(49,49,52,55,48,57)
-    ClearResultArea wsR
-    wsR.Protect UW(49,49,52,55,48,57)
-    wsH.Unprotect UW(49,49,52,55,48,57)
-    ClearHistoryArea wsH
-    wsH.Protect UW(49,49,52,55,48,57)
-    On Error GoTo 0
-End Sub
+    wsIn.Unprotect UW(49, 49, 52, 55, 48, 57)
+    EnsureColorSettings wsIn
+    wsIn.Range("B5").Value = Date
+    wsIn.Range("B6").Value = TimeSerial(8, 0, 0)
+    wsIn.Range("B7").Value = Date
+    Dim clrLocked As Long, clrLockedFont As Long
+    Dim clrEditHasColor As Boolean, clrEditable As Long
+    Dim clrMrsHeader As Long, clrMrsSub As Long, clrMrsOrder As Long, clrFont As Long
+    ReadAllColors wsIn, clrLocked, clrLockedFont, clrEditHasColor, clrEditable, clrMrsHeader, clrMrsSub, clrMrsOrder, clrFont
+    wsIn.Protect UW(49, 49, 52, 55, 48, 57)
+    wsR.Unprotect UW(49, 49, 52, 55, 48, 57)
+    ClearResultArea wsR, clrLocked, clrFont
+    wsR.Protect UW(49, 49, 52, 55, 48, 57)
+    wsH.Unprotect UW(49, 49, 52, 55, 48, 57)
+    ClearHistoryArea wsH, clrLocked, clrFont
+    wsH.Protect UW(49, 49, 52, 55, 48, 57)
+    RefreshWorkbookColors
+    Exit Sub
 
-Private Sub ClearResultArea(ByVal wsOut As Worksheet)
+Cleanup:
     On Error Resume Next
-    wsOut.Range("B2:V20000").UnMerge
-    On Error GoTo 0
-    wsOut.Range("B2:V20000").ClearContents
-    wsOut.Range("B2:V20000").Interior.Color = RGB(255, 230, 230)
-    wsOut.Range("B2:V20000").Borders.LineStyle = xlNone
-    wsOut.Range("B2:V20000").HorizontalAlignment = -4108
+    wsIn.Protect UW(49, 49, 52, 55, 48, 57)
+    wsR.Protect UW(49, 49, 52, 55, 48, 57)
+    wsH.Protect UW(49, 49, 52, 55, 48, 57)
+    Exit Sub
+EH:
+    Resume Cleanup
 End Sub
 
-Private Sub ClearHistoryArea(ByVal wsHist As Worksheet)
+Private Sub ClearResultArea(ByVal wsOut As Worksheet, ByVal clrLocked As Long, ByVal clrFont As Long)
     Dim rng As Range
+
+    Set rng = BuildRowBoundRange(wsOut, 2, 2, 22, 2)
+    On Error Resume Next
+    rng.UnMerge
+    On Error GoTo 0
+    rng.ClearContents
+    rng.Borders.LineStyle = xlNone
+    rng.HorizontalAlignment = -4108
+End Sub
+
+Private Sub ClearHistoryArea(ByVal wsHist As Worksheet, ByVal clrLocked As Long, ByVal clrFont As Long)
+    Dim rng As Range
+    Dim lastRow As Long
+
+    Set rng = BuildRowBoundRange(wsHist, 2, 2, 22, 2)
+    lastRow = rng.Rows(rng.Rows.Count).Row
     Application.EnableEvents = False
     On Error Resume Next
-    wsHist.Range("B2:V20000").UnMerge
+    rng.UnMerge
     On Error GoTo 0
-    Set rng = wsHist.Range("B2:V20000")
     rng.ClearContents
-    rng.Interior.Color = RGB(255, 230, 230)
     rng.Borders.LineStyle = xlNone
     rng.HorizontalAlignment = -4108
     rng.VerticalAlignment = -4108
     rng.Font.Size = 14
-    rng.Font.Color = RGB(0, 0, 0)
+    rng.Font.Color = clrFont
     rng.Font.Bold = False
     rng.NumberFormat = "General"
     rng.Locked = True
     rng.WrapText = False
-    wsHist.Rows("2:20000").RowHeight = wsHist.StandardHeight
+    wsHist.Rows("2:" & lastRow).RowHeight = wsHist.StandardHeight
     Application.EnableEvents = True
 End Sub
 
@@ -389,7 +806,13 @@ Public Sub SyncWorkerIdInputs(ByVal wsIn As Worksheet, ByVal workerCount As Long
     If workerCount < 1 Then workerCount = 1
     If workerCount > 10 Then workerCount = 10
 
-    wsIn.Range("D3").Value = UW(1048,1089,1087,1086,1083,1085,1080,1090,1077,1083,1100)
+    EnsureColorSettings wsIn
+    Dim clrLocked As Long, clrLockedFont As Long
+    Dim clrEditHasColor As Boolean, clrEditable As Long
+    Dim clrMrsHeader As Long, clrMrsSub As Long, clrMrsOrder As Long, clrFont As Long
+    ReadAllColors wsIn, clrLocked, clrLockedFont, clrEditHasColor, clrEditable, clrMrsHeader, clrMrsSub, clrMrsOrder, clrFont
+
+    wsIn.Range("D3").Value = UW(1048, 1089, 1087, 1086, 1083, 1085, 1080, 1090, 1077, 1083, 1100)
     wsIn.Range("D3:E3").Font.Bold = True
     wsIn.Range("E4:E13").NumberFormat = "@"
 
@@ -397,8 +820,8 @@ Public Sub SyncWorkerIdInputs(ByVal wsIn As Worksheet, ByVal workerCount As Long
         Dim rowNum As Long
         rowNum = 3 + i
 
-        wsIn.Cells(rowNum, 4).Value = UW(1048,1089,1087,1086,1083,1085,1080,1090,1077,1083,1100,32) & i
-        StyleWorkerInputRow wsIn, rowNum, (i <= workerCount)
+        wsIn.Cells(rowNum, 4).Value = UW(1048, 1089, 1087, 1086, 1083, 1085, 1080, 1090, 1077, 1083, 1100, 32) & i
+        StyleWorkerInputRow wsIn, rowNum, (i <= workerCount), clrLocked, clrLockedFont, clrEditHasColor, clrEditable, clrFont
     Next i
 End Sub
 
@@ -409,8 +832,14 @@ Public Sub SyncOperationRows(ByVal wsIn As Worksheet, ByVal opCount As Long)
     If opCount < 1 Then opCount = 1
     If opCount > 20 Then opCount = 20
 
+    EnsureColorSettings wsIn
+    Dim clrLocked As Long, clrLockedFont As Long
+    Dim clrEditHasColor As Boolean, clrEditable As Long
+    Dim clrMrsHeader As Long, clrMrsSub As Long, clrMrsOrder As Long, clrFont As Long
+    ReadAllColors wsIn, clrLocked, clrLockedFont, clrEditHasColor, clrEditable, clrMrsHeader, clrMrsSub, clrMrsOrder, clrFont
+
     Dim firstDurUnit As String, firstBreakUnit As String
-    firstDurUnit   = Trim$(CStr(wsIn.Cells(4, 12).Value))  ' L4
+    firstDurUnit = Trim$(CStr(wsIn.Cells(4, 12).Value))    ' L4
     firstBreakUnit = Trim$(CStr(wsIn.Cells(4, 14).Value))  ' N4
 
     Dim i As Long, r As Long, c As Long
@@ -424,15 +853,15 @@ Public Sub SyncOperationRows(ByVal wsIn As Worksheet, ByVal opCount As Long)
     For i = 1 To opCount
         r = i + 3
         wsIn.Cells(r, 7).Value = i
-        wsIn.Cells(r, 7).Font.Color = RGB(0, 0, 0)
+        wsIn.Cells(r, 7).Font.Color = clrFont
         If Trim$(CStr(wsIn.Cells(r, 9).Value)) = "" Then
-            wsIn.Cells(r, 9).Value = UW(1054,1087,1077,1088,1072,1094,1080,1103) & " " & i
+            wsIn.Cells(r, 9).Value = UW(1054, 1087, 1077, 1088, 1072, 1094, 1080, 1103) & " " & i
         End If
         If Trim$(CStr(wsIn.Cells(r, 11).Value)) = "" Then
             wsIn.Cells(r, 11).Value = 0
         End If
         If i > 1 Then
-            If firstDurUnit   <> "" Then wsIn.Cells(r, 12).Value = firstDurUnit
+            If firstDurUnit <> "" Then wsIn.Cells(r, 12).Value = firstDurUnit
             wsIn.Cells(r, 13).Value = 0
             If firstBreakUnit <> "" Then wsIn.Cells(r, 14).Value = firstBreakUnit
             wsIn.Cells(r, 15).Value = ""
@@ -440,9 +869,8 @@ Public Sub SyncOperationRows(ByVal wsIn As Worksheet, ByVal opCount As Long)
         ' Unlock editable columns
         For c = LBound(editCols) To UBound(editCols)
             wsIn.Cells(r, editCols(c)).Locked = False
-            wsIn.Cells(r, editCols(c)).Interior.Pattern = xlNone
+            ApplyEditableStyle wsIn.Cells(r, editCols(c)), clrEditHasColor, clrEditable, clrFont
             wsIn.Cells(r, editCols(c)).Borders.LineStyle = xlContinuous
-            wsIn.Cells(r, editCols(c)).Font.Color = RGB(0, 0, 0)
         Next c
         ' Lock pause (M) for first operation if no history exists
         If i = 1 Then
@@ -452,19 +880,23 @@ Public Sub SyncOperationRows(ByVal wsIn As Worksheet, ByVal opCount As Long)
             histLastRow = wsHist.Cells(wsHist.Rows.Count, 2).End(xlUp).Row
             If histLastRow <= 1 Then
                 wsIn.Cells(r, 13).Locked = True
-                wsIn.Cells(r, 13).Interior.Color = RGB(255, 230, 230)
+                wsIn.Cells(r, 13).Interior.Color = clrLocked
             End If
         End If
 
         ' Synced columns: visible but locked (except row 2 = source)
         For c = LBound(syncCols) To UBound(syncCols)
             wsIn.Cells(r, syncCols(c)).Borders.LineStyle = xlContinuous
-            wsIn.Cells(r, syncCols(c)).Font.Color = RGB(0, 0, 0)
+            wsIn.Cells(r, syncCols(c)).Font.Color = clrFont
             If i = 1 Then
-                wsIn.Cells(r, syncCols(c)).Interior.Pattern = xlNone
+                If clrEditHasColor Then
+                    wsIn.Cells(r, syncCols(c)).Interior.Color = clrEditable
+                Else
+                    wsIn.Cells(r, syncCols(c)).Interior.Pattern = xlNone
+                End If
                 wsIn.Cells(r, syncCols(c)).Locked = False
             Else
-                wsIn.Cells(r, syncCols(c)).Interior.Color = RGB(255, 230, 230)
+                wsIn.Cells(r, syncCols(c)).Interior.Color = clrLocked
                 wsIn.Cells(r, syncCols(c)).Locked = True
             End If
         Next c
@@ -475,8 +907,7 @@ Public Sub SyncOperationRows(ByVal wsIn As Worksheet, ByVal opCount As Long)
         Dim unusedRange As Range
         Set unusedRange = wsIn.Range(wsIn.Cells(opCount + 4, 7), wsIn.Cells(23, 15))
         unusedRange.ClearContents
-        unusedRange.Interior.Color = RGB(255, 230, 230)
-        unusedRange.Font.Color = RGB(255, 230, 230)
+        ApplyLockedStyle unusedRange, clrLocked, clrLockedFont
         unusedRange.Borders.LineStyle = xlNone
         unusedRange.Locked = True
     End If
@@ -499,12 +930,14 @@ Public Sub SanitizeWorkerIdCell(ByVal targetCell As Range)
     End If
 End Sub
 
-Private Sub StyleWorkerInputRow(ByVal wsIn As Worksheet, ByVal rowNum As Long, ByVal isVisible As Boolean)
+Private Sub StyleWorkerInputRow(ByVal wsIn As Worksheet, ByVal rowNum As Long, ByVal isVisible As Boolean, _
+    ByVal clrLocked As Long, ByVal clrLockedFont As Long, _
+    ByVal clrEditHasColor As Boolean, ByVal clrEditable As Long, ByVal clrFont As Long)
     With wsIn.Cells(rowNum, 4)
         If isVisible Then
-            .Font.Color = RGB(0, 0, 0)
+            .Font.Color = clrFont
         Else
-            .Font.Color = RGB(255, 230, 230)
+            .Font.Color = clrLockedFont
             .ClearContents
         End If
         .Locked = True
@@ -513,13 +946,11 @@ Private Sub StyleWorkerInputRow(ByVal wsIn As Worksheet, ByVal rowNum As Long, B
     With wsIn.Cells(rowNum, 5)
         .NumberFormat = "00000000"
         If isVisible Then
-            .Font.Color = RGB(0, 0, 0)
-            .Interior.Pattern = xlNone
+            ApplyEditableStyle wsIn.Cells(rowNum, 5), clrEditHasColor, clrEditable, clrFont
             .Borders.LineStyle = xlContinuous
             .Locked = False
         Else
-            .Font.Color = RGB(255, 230, 230)
-            .Interior.Color = RGB(255, 230, 230)
+            ApplyLockedStyle wsIn.Cells(rowNum, 5), clrLocked, clrLockedFont
             .Borders.LineStyle = xlNone
             .Locked = True
             .ClearContents
@@ -630,7 +1061,7 @@ Public Function DigitsOnly(ByVal rawText As String) As String
     Next i
 End Function
 
-Private Function TimeValueDefault(ByVal raw As Variant, ByVal fallback As Date) As Date
+Private Function TimeValueDefault(ByVal raw As Variant, ByVal Fallback As Date) As Date
     On Error GoTo Fallback
     If IsNumeric(raw) Then
         TimeValueDefault = CDbl(raw) - Fix(CDbl(raw))
@@ -641,7 +1072,7 @@ Private Function TimeValueDefault(ByVal raw As Variant, ByVal fallback As Date) 
     End If
     Exit Function
 Fallback:
-    TimeValueDefault = fallback
+    TimeValueDefault = Fallback
 End Function
 
 Private Function ConvertDurationToDays(ByVal valueNum As Double, ByVal unitName As String) As Double
@@ -655,7 +1086,7 @@ End Function
 Private Function NormalizeUnit(ByVal rawUnit As Variant) As String
     Dim unitName As String
     unitName = LCase$(Trim$(CStr(rawUnit)))
-    If unitName = "hour" Or unitName = LCase$(UW(1095,1072,1089)) Or unitName = LCase$(UW(1095)) Then
+    If unitName = "hour" Or unitName = LCase$(UW(1095, 1072, 1089)) Or unitName = LCase$(UW(1095)) Then
         NormalizeUnit = "hour"
     Else
         NormalizeUnit = "min"
@@ -798,7 +1229,7 @@ Public Function LunchFlag( _
     ByVal lunchDurMin As Double) As String
 
     If DidCrossLunch(startDateTime, endDateTime, lunch1Raw, lunch2Raw, lunchDurMin) Then
-        LunchFlag = UW(1044,1040)
+        LunchFlag = UW(1044, 1040)
     Else
         LunchFlag = ""
     End If
@@ -833,6 +1264,8 @@ Private Function CheckLunchWindow( _
     ByVal lunchDurDays As Double, _
     ByRef crossedLunch As Boolean) As Boolean
 
+    Const EPS As Double = 0.00001
+
     Dim durationKeep As Double
     durationKeep = opEnd - opStart
 
@@ -842,7 +1275,7 @@ Private Function CheckLunchWindow( _
         lunchStart = daySerial + TimePart(lunchTime)
         lunchEnd = lunchStart + lunchDurDays
 
-        If opStart >= lunchStart And opStart < lunchEnd Then
+        If opStart >= lunchStart - EPS And opStart < lunchEnd Then
             opStart = lunchEnd
             opEnd = opStart + durationKeep
             crossedLunch = True
@@ -893,8 +1326,8 @@ Private Function IsWorkerSelected(ByVal spec As String, ByVal workerIndex As Lon
             r = Split(token, "-")
             If UBound(r) = 1 Then
                 Dim fromN As Long, toN As Long
-                fromN = CLng(Val(r(0)))
-                toN = CLng(Val(r(1)))
+                fromN = CLng(val(r(0)))
+                toN = CLng(val(r(1)))
                 If fromN > toN Then
                     Dim tmp As Long
                     tmp = fromN
@@ -907,7 +1340,7 @@ Private Function IsWorkerSelected(ByVal spec As String, ByVal workerIndex As Lon
                 End If
             End If
         Else
-            If workerIndex = CLng(Val(token)) Then
+            If workerIndex = CLng(val(token)) Then
                 IsWorkerSelected = True
                 Exit Function
             End If
@@ -948,38 +1381,41 @@ Private Sub AppendResultToHistory( _
     ByVal lunch1 As Date, _
     ByVal lunch2 As Date, _
     ByVal lunchDurMin As Double, _
-    ByVal primaryIsMin As Boolean)
+    ByVal primaryIsMin As Boolean, _
+    ByVal clrEditHasColor As Boolean, _
+    ByVal clrEditable As Long, _
+    ByVal clrFont As Long)
 
     Dim hLunch1 As String, hLunch2 As String, hLunchDur As String
     hLunch1 = """" & Format$(lunch1, "hh:nn:ss") & """"
     hLunch2 = """" & Format$(lunch2, "hh:nn:ss") & """"
     hLunchDur = NumForFormula(lunchDurMin)
 
-    Dim nextRow As Long
-    nextRow = wsHist.Cells(wsHist.Rows.Count, 2).End(xlUp).Row + 1
-    If nextRow < 2 Then nextRow = 2
+    Dim NextRow As Long
+    NextRow = wsHist.Cells(wsHist.Rows.Count, 2).End(xlUp).Row + 1
+    If NextRow < 2 Then NextRow = 2
 
     ' пустая строка-разделитель между блоками
-    nextRow = nextRow + 1
+    NextRow = NextRow + 1
 
     ' заголовок блока: Номер Заказа | Наименование | Сформирован
     Dim orderNum As String, orderName As String
     orderNum = Trim$(CStr(wsIn.Range("B3").Value))
     orderName = Trim$(CStr(wsIn.Range("B4").Value))
-    wsHist.Range(wsHist.Cells(nextRow, 2), wsHist.Cells(nextRow, 22)).Merge
-    wsHist.Cells(nextRow, 2).Value = UW(1053,1086,1084,1077,1088,32,1047,1072,1082,1072,1079,1072) & ": " & orderNum & _
-        "  |  " & UW(1053,1072,1080,1084,1077,1085,1086,1074,1072,1085,1080,1077) & ": " & orderName & _
-        "  |  " & UW(1057,1092,1086,1088,1084,1080,1088,1086,1074,1072,1085) & ": " & Format$(Now, "dd.mm.yyyy hh:nn:ss")
-    wsHist.Cells(nextRow, 2).Font.Bold = True
-    wsHist.Range(wsHist.Cells(nextRow, 2), wsHist.Cells(nextRow, 22)).Borders.LineStyle = xlContinuous
-    wsHist.Range(wsHist.Cells(nextRow, 2), wsHist.Cells(nextRow, 22)).HorizontalAlignment = -4108
-    nextRow = nextRow + 1
+    wsHist.Range(wsHist.Cells(NextRow, 2), wsHist.Cells(NextRow, 22)).Merge
+    wsHist.Cells(NextRow, 2).Value = UW(1053, 1086, 1084, 1077, 1088, 32, 1047, 1072, 1082, 1072, 1079, 1072) & ": " & orderNum & _
+        "  |  " & UW(1053, 1072, 1080, 1084, 1077, 1085, 1086, 1074, 1072, 1085, 1080, 1077) & ": " & orderName & _
+        "  |  " & UW(1057, 1092, 1086, 1088, 1084, 1080, 1088, 1086, 1074, 1072, 1085) & ": " & Format$(Now, "dd.mm.yyyy hh:nn:ss")
+    wsHist.Cells(NextRow, 2).Font.Bold = True
+    wsHist.Range(wsHist.Cells(NextRow, 2), wsHist.Cells(NextRow, 22)).Borders.LineStyle = xlContinuous
+    wsHist.Range(wsHist.Cells(NextRow, 2), wsHist.Cells(NextRow, 22)).HorizontalAlignment = -4108
+    NextRow = NextRow + 1
 
-    wsOut.Range("A1:V1").Copy Destination:=wsHist.Cells(nextRow, 1)
-    nextRow = nextRow + 1
+    wsOut.Range("A1:V1").Copy Destination:=wsHist.Cells(NextRow, 1)
+    NextRow = NextRow + 1
     Dim dataStartRow As Long, dataEndRow As Long
-    dataStartRow = nextRow
-    dataEndRow = nextRow + (lastDataRow - 2)
+    dataStartRow = NextRow
+    dataEndRow = NextRow + (lastDataRow - 2)
 
     wsOut.Range("A2:V" & lastDataRow).Copy Destination:=wsHist.Cells(dataStartRow, 1)
 
@@ -1051,13 +1487,13 @@ Private Sub AppendResultToHistory( _
     wsHist.Range(wsHist.Cells(headerRow, 21), wsHist.Cells(dataEndRow, 21)).Borders(10).LineStyle = xlContinuous
     wsHist.Range(wsHist.Cells(headerRow, 21), wsHist.Cells(dataEndRow, 21)).Borders(10).Weight = 4
 
-    nextRow = nextRow + (lastDataRow - 1) + 1
+    NextRow = NextRow + (lastDataRow - 1) + 1
 
     ' Z7 block with merged cells
     Dim z7Start As Long
-    z7Start = nextRow
-    wsHist.Cells(nextRow, 2).Value = "Z7"
-    wsHist.Cells(nextRow + 1, 2).Resize(5, 1).Value = wsOut.Range("B" & (lastZ7Row - 4) & ":B" & lastZ7Row).Value
+    z7Start = NextRow
+    wsHist.Cells(NextRow, 2).Value = "Z7"
+    wsHist.Cells(NextRow + 1, 2).Resize(5, 1).Value = wsOut.Range("B" & (lastZ7Row - 4) & ":B" & lastZ7Row).Value
 
     Dim zhr As Long
     For zhr = z7Start To z7Start + 5
@@ -1077,7 +1513,11 @@ Private Sub AppendResultToHistory( _
             If editCol(ec) = 5 And rr = dataStartRow And prevDataEndRow = 0 Then GoTo SkipCell
             If Not wsHist.Cells(rr, editCol(ec)).HasFormula Then
                 wsHist.Cells(rr, editCol(ec)).Locked = False
-                wsHist.Cells(rr, editCol(ec)).Interior.Pattern = xlNone
+                If clrEditHasColor Then
+                    wsHist.Cells(rr, editCol(ec)).Interior.Color = clrEditable
+                Else
+                    wsHist.Cells(rr, editCol(ec)).Interior.Pattern = xlNone
+                End If
                 If editCol(ec) = 12 Then wsHist.Cells(rr, editCol(ec)).NumberFormat = "@"
             End If
 SkipCell:
@@ -1090,9 +1530,17 @@ SkipCell:
     ' R+S first row: unlock only if value (no previous block)
     If prevDataEndRow = 0 Then
         wsHist.Cells(dataStartRow, 18).Locked = False
-        wsHist.Cells(dataStartRow, 18).Interior.Pattern = xlNone
+        If clrEditHasColor Then
+            wsHist.Cells(dataStartRow, 18).Interior.Color = clrEditable
+        Else
+            wsHist.Cells(dataStartRow, 18).Interior.Pattern = xlNone
+        End If
         wsHist.Cells(dataStartRow, 19).Locked = False
-        wsHist.Cells(dataStartRow, 19).Interior.Pattern = xlNone
+        If clrEditHasColor Then
+            wsHist.Cells(dataStartRow, 19).Interior.Color = clrEditable
+        Else
+            wsHist.Cells(dataStartRow, 19).Interior.Pattern = xlNone
+        End If
     End If
 
     ' Font 14 for all new data (copied from Result may have different font)
@@ -1138,39 +1586,58 @@ End Function
 
 Public Sub LoadMRS()
     If Not ZQ() Then
-        MsgBox UW(1054,1096,1080,1073,1082,1072,33), vbCritical
+        MsgBox UW(1054, 1096, 1080, 1073, 1082, 1072, 33), vbCritical
         Exit Sub
     End If
     On Error GoTo EH
+
+    Dim stage As String
+    stage = "LoadMRS start"
 
     Dim wsMRS As Worksheet
     Set wsMRS = ThisWorkbook.Worksheets(4)
 
     Dim filePath As Variant
-    If MsgBox(UW(1042,1099,1075,1088,1091,1078,1072,1081,1090,1077,32,1076,1072,1085,1085,1099,1077,32,1079,1072,32,1054,1044,1048,1053,32,1076,1077,1085,1100,44,32,1080,1085,1072,1095,1077,32,1073,1091,1076,1077,1090,32,1073,1077,1076,1072,46,46,46), vbOKCancel + vbExclamation) = vbCancel Then Exit Sub
+    If MsgBox(UW(1042, 1099, 1075, 1088, 1091, 1078, 1072, 1081, 1090, 1077, 32, 1076, 1072, 1085, 1085, 1099, 1077, 32, 1079, 1072, 32, 1054, 1044, 1048, 1053, 32, 1076, 1077, 1085, 1100, 44, 32, 1080, 1085, 1072, 1095, 1077, 32, 1073, 1091, 1076, 1077, 1090, 32, 1073, 1077, 1076, 1072, 46, 46, 46), vbOKCancel + vbExclamation) = vbCancel Then Exit Sub
 
-    filePath = Application.GetOpenFilename(UW(1060,1072,1081,1083,1099) & " Excel (*.xlsx), *.xlsx")
+    filePath = Application.GetOpenFilename(UW(1060, 1072, 1081, 1083, 1099) & " Excel (*.xlsx), *.xlsx")
     If filePath = False Then Exit Sub
+
+    Dim wsIn As Worksheet
+    Set wsIn = ThisWorkbook.Worksheets(1)
+    stage = "Ensure color settings"
+    wsIn.Unprotect UW(49, 49, 52, 55, 48, 57)
+    EnsureColorSettings wsIn
+    Dim clrLocked As Long, clrLockedFont As Long
+    Dim clrEditHasColor As Boolean, clrEditable As Long
+    Dim clrMrsHeader As Long, clrMrsSub As Long, clrMrsOrder As Long, clrFont As Long
+    stage = "Read colors from settings"
+    ReadAllColors wsIn, clrLocked, clrLockedFont, clrEditHasColor, clrEditable, clrMrsHeader, clrMrsSub, clrMrsOrder, clrFont
+    wsIn.Protect UW(49, 49, 52, 55, 48, 57)
 
     Application.ScreenUpdating = False
     Application.EnableEvents = False
-    wsMRS.Unprotect UW(49,49,52,55,48,57)
-    ClearMRSArea wsMRS
+    wsMRS.Unprotect UW(49, 49, 52, 55, 48, 57)
+    stage = "Clear MRS sheet"
+    ClearMRSArea wsMRS, clrLocked, clrFont
 
     Dim srcWb As Workbook
+    stage = "Open source workbook"
     Set srcWb = Workbooks.Open(CStr(filePath), ReadOnly:=True)
     Dim srcWs As Worksheet
     Set srcWs = srcWb.Sheets(1)
 
     Dim lastRow As Long
+    stage = "Detect source last row"
     lastRow = srcWs.Cells(srcWs.Rows.Count, 5).End(xlUp).Row
     If lastRow < 2 Then
         srcWb.Close False
-        MsgBox UW(1060,1072,1081,1083,32,1087,1091,1089,1090), vbInformation
+        MsgBox UW(1060, 1072, 1081, 1083, 32, 1087, 1091, 1089, 1090), vbInformation
         GoTo Done
     End If
 
     Dim data As Variant
+    stage = "Read source range into array"
     data = srcWs.Range("A1:Z" & lastRow).Value
     srcWb.Close False
 
@@ -1178,6 +1645,7 @@ Public Sub LoadMRS()
     totalRows = UBound(data, 1) - 1
 
     ' Parse rows into arrays
+    stage = "Parse source rows"
     Dim i As Long
     Dim arrOrder() As String, arrOp() As String
     Dim arrWName() As String, arrWID() As String
@@ -1260,11 +1728,12 @@ NextRow:
 
     totalRows = validCount
     If totalRows = 0 Then
-        MsgBox UW(1053,1077,1090,32,1079,1072,1082,1072,1079,1086,1074,32,1089,32,1095,1080,1089,1083,1086,1074,1099,1084,32,1085,1086,1084,1077,1088,1086,1084), vbInformation
+        MsgBox UW(1053, 1077, 1090, 32, 1079, 1072, 1082, 1072, 1079, 1086, 1074, 32, 1089, 32, 1095, 1080, 1089, 1083, 1086, 1074, 1099, 1084, 32, 1085, 1086, 1084, 1077, 1088, 1086, 1084), vbInformation
         GoTo Done
     End If
 
     ' === Step 0: Collect unique dates ===
+    stage = "Collect unique dates"
     Dim dictDates As Object
     Set dictDates = CreateObject("Scripting.Dictionary")
     For i = 1 To totalRows
@@ -1304,17 +1773,19 @@ NextRow:
         curDateKey = dateKeys(d)
 
         ' Date header
+        stage = "Write date header " & CStr(d)
         outRow = outRow + 1
         wsMRS.Range(wsMRS.Cells(outRow, 2), wsMRS.Cells(outRow, 14)).Merge
         wsMRS.Cells(outRow, 2).Value = Format(CDate(CDbl(curDateKey)), "dd"".""mm"".""yyyy")
-        wsMRS.Cells(outRow, 2).Font.Bold = True
+        SetCellBoldSafe wsMRS.Cells(outRow, 2), True, "MRS date header"
         wsMRS.Cells(outRow, 2).Font.Size = 18
         wsMRS.Range(wsMRS.Cells(outRow, 2), wsMRS.Cells(outRow, 14)).Borders.LineStyle = xlContinuous
         wsMRS.Cells(outRow, 2).HorizontalAlignment = -4108
-        wsMRS.Cells(outRow, 2).Interior.Color = RGB(180, 198, 231)
+        wsMRS.Cells(outRow, 2).Interior.Color = clrMrsHeader
         wsMRS.Rows(outRow).RowHeight = 40
 
         ' === Step 1: Build worker set per order (filtered by date) ===
+        stage = "Build order-worker map for date " & CStr(d)
         Dim dictOrderW As Object
         Set dictOrderW = CreateObject("Scripting.Dictionary")
         Dim dictOrderTime As Object
@@ -1341,6 +1812,7 @@ SkipDateRow:
         Next i
 
     ' === Step 2: Build brigade key per order (sorted worker IDs) ===
+    stage = "Build brigade keys for date " & CStr(d)
     Dim dictOrdBrigKey As Object ' order -> brigade key string
     Set dictOrdBrigKey = CreateObject("Scripting.Dictionary")
     Dim key As Variant
@@ -1369,6 +1841,7 @@ SkipDateRow:
     Next key
 
     ' === Step 3: Group orders by brigade key ===
+    stage = "Group brigades for date " & CStr(d)
     Dim dictBrigades As Object ' brigKey -> Dictionary of order -> startTime
     Set dictBrigades = CreateObject("Scripting.Dictionary")
     Dim dictBrigTime As Object ' brigKey -> earliest start time across all orders
@@ -1391,6 +1864,7 @@ SkipDateRow:
     Next key
 
     ' === Step 4: Sort brigades by earliest start time ===
+    stage = "Sort brigades for date " & CStr(d)
     Dim brigCount As Long
     brigCount = dictBrigades.Count
     Dim brigKeys() As String, brigTimes() As Double
@@ -1415,6 +1889,7 @@ SkipDateRow:
     Next i
 
     ' === Step 5: Write blocks ===
+    stage = "Write brigade blocks for date " & CStr(d)
     Dim b As Long
     For b = 1 To brigCount
         Dim curBrigKey As String
@@ -1438,14 +1913,15 @@ SkipDateRow:
         Next wi
 
         ' Brigade header (merged B:N)
+        stage = "Write brigade header " & CStr(d) & "." & CStr(b)
         outRow = outRow + 1
         wsMRS.Range(wsMRS.Cells(outRow, 2), wsMRS.Cells(outRow, 14)).Merge
-        wsMRS.Cells(outRow, 2).Value = UW(1041,1088,1080,1075,1072,1076,1072) & ": " & wStr
-        wsMRS.Cells(outRow, 2).Font.Bold = True
+        wsMRS.Cells(outRow, 2).Value = UW(1041, 1088, 1080, 1075, 1072, 1076, 1072) & ": " & wStr
+        SetCellBoldSafe wsMRS.Cells(outRow, 2), True, "MRS brigade header"
         wsMRS.Cells(outRow, 2).Font.Size = 16
         wsMRS.Range(wsMRS.Cells(outRow, 2), wsMRS.Cells(outRow, 14)).Borders.LineStyle = xlContinuous
-        wsMRS.Cells(outRow, 2).HorizontalAlignment = -4131
-        wsMRS.Cells(outRow, 2).Interior.Color = RGB(200, 220, 255)
+        wsMRS.Cells(outRow, 2).HorizontalAlignment = -4108  ' xlCenter
+        wsMRS.Cells(outRow, 2).Interior.Color = clrMrsSub
         wsMRS.Cells(outRow, 2).WrapText = True
         wsMRS.Rows(outRow).RowHeight = 60
 
@@ -1523,64 +1999,72 @@ SkipDateRow:
 
             ' Pause row between orders (not before first)
             If oi > 1 Then
+                stage = "Write pause row " & CStr(d) & "." & CStr(b) & "." & CStr(oi)
                 outRow = outRow + 1
                 pauseCellRow = outRow
                 wsMRS.Range(wsMRS.Cells(outRow, 2), wsMRS.Cells(outRow, 8)).Merge
-                wsMRS.Cells(outRow, 2).Value = UW(1055,1072,1091,1079,1072,32,40,1084,1080,1085,41,58)
-                wsMRS.Cells(outRow, 2).Font.Bold = True
-                wsMRS.Cells(outRow, 2).HorizontalAlignment = -4152
+                wsMRS.Cells(outRow, 2).Value = UW(1055, 1072, 1091, 1079, 1072, 32, 40, 1084, 1080, 1085, 41, 58)
+                SetCellBoldSafe wsMRS.Cells(outRow, 2), True, "MRS pause row"
+                wsMRS.Cells(outRow, 2).HorizontalAlignment = -4108  ' xlCenter
                 wsMRS.Cells(outRow, 9).NumberFormat = "0.00"
                 wsMRS.Cells(outRow, 9).Value = 0
                 wsMRS.Cells(outRow, 9).NumberFormat = "@"
                 wsMRS.Cells(outRow, 9).Locked = False
-                wsMRS.Cells(outRow, 9).Interior.Color = RGB(255, 255, 255)
+                If clrEditHasColor Then
+                    wsMRS.Cells(outRow, 9).Interior.Color = clrEditable
+                Else
+                    wsMRS.Cells(outRow, 9).Interior.Pattern = xlNone
+                End If
                 wsMRS.Range(wsMRS.Cells(outRow, 10), wsMRS.Cells(outRow, 14)).Merge
                 wsMRS.Range(wsMRS.Cells(outRow, 2), wsMRS.Cells(outRow, 14)).Borders.LineStyle = xlContinuous
             End If
 
             ' Order header (merged B:N)
+            stage = "Write order header " & CStr(d) & "." & CStr(b) & "." & CStr(oi)
             outRow = outRow + 1
             wsMRS.Range(wsMRS.Cells(outRow, 2), wsMRS.Cells(outRow, 14)).Merge
-            wsMRS.Cells(outRow, 2).Value = UW(1047,1072,1082,1072,1079) & ": " & curOrder & " | " & UW(1056,1072,1073,1086,1095,1077,1077,32,1084,1077,1089,1090,1086) & ": " & arrWPlace(fIdx)
-            wsMRS.Cells(outRow, 2).Font.Bold = True
+            wsMRS.Cells(outRow, 2).Value = UW(1047, 1072, 1082, 1072, 1079) & ": " & curOrder & " | " & UW(1056, 1072, 1073, 1086, 1095, 1077, 1077, 32, 1084, 1077, 1089, 1090, 1086) & ": " & arrWPlace(fIdx)
+            wsMRS.Cells(outRow, 2).Font.Size = 15
+            SetCellBoldSafe wsMRS.Cells(outRow, 2), True, "MRS order header"
             wsMRS.Range(wsMRS.Cells(outRow, 2), wsMRS.Cells(outRow, 14)).Borders.LineStyle = xlContinuous
-            wsMRS.Cells(outRow, 2).HorizontalAlignment = -4131
+            wsMRS.Cells(outRow, 2).HorizontalAlignment = -4108  ' xlCenter
 
             ' Column headers row 1
+            stage = "Write column header block " & CStr(d) & "." & CStr(b) & "." & CStr(oi)
             outRow = outRow + 1
             Dim hdrRow1 As Long: hdrRow1 = outRow
             wsMRS.Range(wsMRS.Cells(outRow, 2), wsMRS.Cells(outRow + 1, 2)).Merge
             wsMRS.Cells(outRow, 2).Value = UW(8470)
             wsMRS.Range(wsMRS.Cells(outRow, 3), wsMRS.Cells(outRow + 1, 3)).Merge
-            wsMRS.Cells(outRow, 3).Value = UW(1054,1087,1077,1088,1072,1094,1080,1103)
+            wsMRS.Cells(outRow, 3).Value = UW(1054, 1087, 1077, 1088, 1072, 1094, 1080, 1103)
             wsMRS.Range(wsMRS.Cells(outRow, 4), wsMRS.Cells(outRow + 1, 4)).Merge
-            wsMRS.Cells(outRow, 4).Value = UW(1048,1089,1087,1086,1083,1085,1080,1090,1077,1083,1100)
+            wsMRS.Cells(outRow, 4).Value = UW(1048, 1089, 1087, 1086, 1083, 1085, 1080, 1090, 1077, 1083, 1100)
             wsMRS.Range(wsMRS.Cells(outRow, 5), wsMRS.Cells(outRow + 1, 5)).Merge
-            wsMRS.Cells(outRow, 5).Value = UW(1058,1072,1073,46,8470)
+            wsMRS.Cells(outRow, 5).Value = UW(1058, 1072, 1073, 46, 8470)
             wsMRS.Range(wsMRS.Cells(outRow, 6), wsMRS.Cells(outRow + 1, 6)).Merge
-            wsMRS.Cells(outRow, 6).Value = UW(1044,1072,1090,1072,32,1085,1072,1095,1072,1083,1072)
+            wsMRS.Cells(outRow, 6).Value = UW(1044, 1072, 1090, 1072, 32, 1085, 1072, 1095, 1072, 1083, 1072)
             wsMRS.Range(wsMRS.Cells(outRow, 7), wsMRS.Cells(outRow + 1, 7)).Merge
-            wsMRS.Cells(outRow, 7).Value = UW(1042,1088,1077,1084,1103,32,1085,1072,1095,1072,1083,1072)
+            wsMRS.Cells(outRow, 7).Value = UW(1042, 1088, 1077, 1084, 1103, 32, 1085, 1072, 1095, 1072, 1083, 1072)
             wsMRS.Range(wsMRS.Cells(outRow, 8), wsMRS.Cells(outRow + 1, 8)).Merge
-            wsMRS.Cells(outRow, 8).Value = UW(1044,1072,1090,1072,32,1082,1086,1085,1094,1072)
+            wsMRS.Cells(outRow, 8).Value = UW(1044, 1072, 1090, 1072, 32, 1082, 1086, 1085, 1094, 1072)
             wsMRS.Range(wsMRS.Cells(outRow, 9), wsMRS.Cells(outRow + 1, 9)).Merge
-            wsMRS.Cells(outRow, 9).Value = UW(1042,1088,1077,1084,1103,32,1082,1086,1085,1094,1072)
+            wsMRS.Cells(outRow, 9).Value = UW(1042, 1088, 1077, 1084, 1103, 32, 1082, 1086, 1085, 1094, 1072)
             wsMRS.Range(wsMRS.Cells(outRow, 10), wsMRS.Cells(outRow, 11)).Merge
-            wsMRS.Cells(outRow, 10).Value = UW(1055,1072,1088,1089,1080,1085,1075,40,1044,1074,1086,1081,1085,1086,1077,32,1054,1082,1088,1091,1075,1083,1077,1085,1080,1077,41)
+            wsMRS.Cells(outRow, 10).Value = UW(1055, 1072, 1088, 1089, 1080, 1085, 1075, 40, 1044, 1074, 1086, 1081, 1085, 1086, 1077, 32, 1054, 1082, 1088, 1091, 1075, 1083, 1077, 1085, 1080, 1077, 41)
             wsMRS.Range(wsMRS.Cells(outRow, 12), wsMRS.Cells(outRow, 13)).Merge
-            wsMRS.Cells(outRow, 12).Value = UW(1056,1072,1089,1095,1077,1090,1085,1086,1077)
+            wsMRS.Cells(outRow, 12).Value = UW(1056, 1072, 1089, 1095, 1077, 1090, 1085, 1086, 1077)
             wsMRS.Range(wsMRS.Cells(outRow, 14), wsMRS.Cells(outRow + 1, 14)).Merge
-            wsMRS.Cells(outRow, 14).Value = UW(1054,1073,1077,1076,63)
+            wsMRS.Cells(outRow, 14).Value = UW(1054, 1073, 1077, 1076, 63)
 
             ' Column headers row 2
             outRow = outRow + 1
-            wsMRS.Cells(outRow, 10).Value = UW(1056,1072,1073,1086,1090,1072,40,1095,1072,1089,41)
-            wsMRS.Cells(outRow, 11).Value = UW(1056,1072,1073,1086,1090,1072,40,1084,1080,1085,41)
-            wsMRS.Cells(outRow, 12).Value = UW(1056,1072,1073,1086,1090,1072,40,1095,1072,1089,41)
-            wsMRS.Cells(outRow, 13).Value = UW(1056,1072,1073,1086,1090,1072,40,1084,1080,1085,41)
+            wsMRS.Cells(outRow, 10).Value = UW(1056, 1072, 1073, 1086, 1090, 1072, 40, 1095, 1072, 1089, 41)
+            wsMRS.Cells(outRow, 11).Value = UW(1056, 1072, 1073, 1086, 1090, 1072, 40, 1084, 1080, 1085, 41)
+            wsMRS.Cells(outRow, 12).Value = UW(1056, 1072, 1073, 1086, 1090, 1072, 40, 1095, 1072, 1089, 41)
+            wsMRS.Cells(outRow, 13).Value = UW(1056, 1072, 1073, 1086, 1090, 1072, 40, 1084, 1080, 1085, 41)
 
             ' Header formatting
-            wsMRS.Range(wsMRS.Cells(hdrRow1, 2), wsMRS.Cells(outRow, 14)).Font.Bold = True
+            SetRangeBoldSafe wsMRS.Range(wsMRS.Cells(hdrRow1, 2), wsMRS.Cells(outRow, 14)), True, "MRS column header block"
             wsMRS.Range(wsMRS.Cells(hdrRow1, 2), wsMRS.Cells(outRow, 14)).Borders.LineStyle = xlContinuous
             wsMRS.Range(wsMRS.Cells(hdrRow1, 2), wsMRS.Cells(outRow, 14)).WrapText = True
 
@@ -1592,8 +2076,9 @@ SkipDateRow:
             Dim totalDur As Double: totalDur = 0
             Dim dataStartRow As Long: dataStartRow = outRow + 1
             Dim idx As Long
-            Dim daStr As String: daStr = UW(1044,1040)
+            Dim daStr As String: daStr = UW(1044, 1040)
             For i = 1 To blkCnt
+                stage = "Write data row " & CStr(d) & "." & CStr(b) & "." & CStr(oi) & "." & CStr(i)
                 outRow = outRow + 1
                 idx = blkIdx(i)
                 Dim curWID As String
@@ -1629,7 +2114,11 @@ SkipDateRow:
                     End If
                     wsMRS.Cells(outRow, 7).Value = startTimeVal
                     wsMRS.Cells(outRow, 7).Locked = False
-                    wsMRS.Cells(outRow, 7).Interior.Color = RGB(255, 255, 255)
+                    If clrEditHasColor Then
+                        wsMRS.Cells(outRow, 7).Interior.Color = clrEditable
+                    Else
+                        wsMRS.Cells(outRow, 7).Interior.Pattern = xlNone
+                    End If
                 End If
                 wsMRS.Cells(outRow, 6).NumberFormat = "dd"".""mm"".""yyyy"
                 wsMRS.Cells(outRow, 7).NumberFormat = "h:mm:ss"
@@ -1649,7 +2138,11 @@ SkipDateRow:
                 wsMRS.Cells(outRow, 13).Value = Round(initMin, 2)
                 wsMRS.Cells(outRow, 13).NumberFormat = "@"
                 wsMRS.Cells(outRow, 13).Locked = False
-                wsMRS.Cells(outRow, 13).Interior.Color = RGB(255, 255, 255)
+                If clrEditHasColor Then
+                    wsMRS.Cells(outRow, 13).Interior.Color = clrEditable
+                Else
+                    wsMRS.Cells(outRow, 13).Interior.Pattern = xlNone
+                End If
 
                 ' L = Расчетное час (formula from M)
                 Dim r As String: r = CStr(outRow)
@@ -1688,24 +2181,25 @@ SkipDateRow:
             Next i
 
             ' Totals row with SUM formulas
+            stage = "Write totals row " & CStr(d) & "." & CStr(b) & "." & CStr(oi)
             Dim dataEndRow As Long: dataEndRow = outRow
             outRow = outRow + 1
             wsMRS.Range(wsMRS.Cells(outRow, 2), wsMRS.Cells(outRow, 9)).Merge
-            wsMRS.Cells(outRow, 2).Value = UW(1048,1090,1086,1075,1086) & ": " & blkCnt & " " & UW(1079,1072,1087,1080,1089,1077,1081)
-            wsMRS.Cells(outRow, 2).Font.Bold = True
-            wsMRS.Cells(outRow, 2).HorizontalAlignment = -4131
+            wsMRS.Cells(outRow, 2).Value = UW(1048, 1090, 1086, 1075, 1086) & ": " & blkCnt & " " & UW(1079, 1072, 1087, 1080, 1089, 1077, 1081)
+            SetCellBoldSafe wsMRS.Cells(outRow, 2), True, "MRS totals label"
+            wsMRS.Cells(outRow, 2).HorizontalAlignment = -4108  ' xlCenter
             wsMRS.Cells(outRow, 10).Formula = "=SUM(J" & dataStartRow & ":J" & dataEndRow & ")"
             wsMRS.Cells(outRow, 10).NumberFormat = "0.00"
-            wsMRS.Cells(outRow, 10).Font.Bold = True
+            SetCellBoldSafe wsMRS.Cells(outRow, 10), True, "MRS totals J"
             wsMRS.Cells(outRow, 11).Formula = "=SUM(K" & dataStartRow & ":K" & dataEndRow & ")"
             wsMRS.Cells(outRow, 11).NumberFormat = "0.00"
-            wsMRS.Cells(outRow, 11).Font.Bold = True
+            SetCellBoldSafe wsMRS.Cells(outRow, 11), True, "MRS totals K"
             wsMRS.Cells(outRow, 12).Formula = "=SUM(L" & dataStartRow & ":L" & dataEndRow & ")"
             wsMRS.Cells(outRow, 12).NumberFormat = "0.00"
-            wsMRS.Cells(outRow, 12).Font.Bold = True
+            SetCellBoldSafe wsMRS.Cells(outRow, 12), True, "MRS totals L"
             wsMRS.Cells(outRow, 13).Formula = "=SUM(M" & dataStartRow & ":M" & dataEndRow & ")"
             wsMRS.Cells(outRow, 13).NumberFormat = "0.00"
-            wsMRS.Cells(outRow, 13).Font.Bold = True
+            SetCellBoldSafe wsMRS.Cells(outRow, 13), True, "MRS totals M"
             wsMRS.Range(wsMRS.Cells(outRow, 2), wsMRS.Cells(outRow, 14)).Borders.LineStyle = xlContinuous
         Next oi
 
@@ -1715,12 +2209,38 @@ SkipDateRow:
     Next d
 
     ' Apply formatting to used area
+    stage = "Finalize MRS formatting"
     Dim dataRange As Range
     Set dataRange = wsMRS.Range(wsMRS.Cells(3, 2), wsMRS.Cells(outRow, 14))
     dataRange.Font.Size = 14
-    dataRange.Font.Color = RGB(0, 0, 0)
+    dataRange.Font.Color = clrFont
     dataRange.HorizontalAlignment = -4108
     dataRange.VerticalAlignment = -4108
+
+    ' Restore header font sizes and alignment (overwritten by bulk formatting above)
+    Dim rr As Long
+    Dim cellVal As String
+    Dim mergeColCount As Long
+    For rr = 3 To outRow
+        If wsMRS.Cells(rr, 2).MergeCells Then
+            mergeColCount = wsMRS.Cells(rr, 2).MergeArea.Columns.Count
+            cellVal = CStr(wsMRS.Cells(rr, 2).Value)
+            If mergeColCount >= 10 Then
+                If Left$(cellVal, 1) >= "0" And Left$(cellVal, 1) <= "9" Then
+                    ' Date header (e.g. "02.02.2026")
+                    wsMRS.Cells(rr, 2).Font.Size = 18
+                ElseIf Left$(cellVal, 1) = ChrW(1041) Then
+                    ' Brigade header (starts with "Б" from "Бригада:")
+                    wsMRS.Cells(rr, 2).Font.Size = 16
+                ElseIf Left$(cellVal, 1) = ChrW(1047) Then
+                    ' Order header (starts with "З" from "Заказ:")
+                    wsMRS.Cells(rr, 2).Font.Size = 15
+                End If
+            End If
+        End If
+    Next rr
+
+    RefreshMRSSheetColors wsMRS, clrLocked, clrEditHasColor, clrEditable, clrMrsHeader, clrMrsSub, clrMrsOrder, clrFont
 
     ' Column widths
     wsMRS.Columns("A:A").ColumnWidth = 2.7
@@ -1738,62 +2258,106 @@ SkipDateRow:
     wsMRS.Columns("M:M").ColumnWidth = 24
     wsMRS.Columns("N:N").ColumnWidth = 10
 
-    MsgBox UW(1055,1072,1088,1089,1080,1085,1075,32,1079,1072,1074,1077,1088,1096,1077,1085,32,1091,1089,1087,1077,1096,1085,1086,46), vbInformation
+    MsgBox UW(1055, 1072, 1088, 1089, 1080, 1085, 1075, 32, 1079, 1072, 1074, 1077, 1088, 1096, 1077, 1085, 32, 1091, 1089, 1087, 1077, 1096, 1085, 1086, 46), vbInformation
 
     Dim errMsg As String
 Done:
     On Error Resume Next
     If Not srcWb Is Nothing Then srcWb.Close False
-    wsMRS.Protect UW(49,49,52,55,48,57)
+    wsMRS.Protect UW(49, 49, 52, 55, 48, 57)
     Application.EnableEvents = True
     Application.ScreenUpdating = True
     On Error GoTo 0
     If Len(errMsg) > 0 Then
-        MsgBox UW(1054,1096,1080,1073,1082,1072,58,32) & errMsg, vbCritical
+        MsgBox UW(1054, 1096, 1080, 1073, 1082, 1072, 58, 32) & errMsg, vbCritical
     End If
     Exit Sub
 EH:
-    errMsg = Err.Description
+    errMsg = stage & " | " & Err.Description
     Resume Done
 End Sub
 
 Public Sub ClearMRS()
     If Not ZQ() Then
-        MsgBox UW(1054,1096,1080,1073,1082,1072,33), vbCritical
+        MsgBox UW(1054, 1096, 1080, 1073, 1082, 1072, 33), vbCritical
         Exit Sub
     End If
-    On Error Resume Next
-    Dim wsMRS As Worksheet
+    On Error GoTo EH
+    Dim wsIn As Worksheet, wsMRS As Worksheet
+    Set wsIn = ThisWorkbook.Worksheets(1)
     Set wsMRS = ThisWorkbook.Worksheets(4)
-    wsMRS.Unprotect UW(49,49,52,55,48,57)
-    ClearMRSArea wsMRS
-    wsMRS.Protect UW(49,49,52,55,48,57)
-    On Error GoTo 0
+    wsIn.Unprotect UW(49, 49, 52, 55, 48, 57)
+    EnsureColorSettings wsIn
+    Dim clrLocked As Long, clrLockedFont As Long
+    Dim clrEditHasColor As Boolean, clrEditable As Long
+    Dim clrMrsHeader As Long, clrMrsSub As Long, clrMrsOrder As Long, clrFont As Long
+    ReadAllColors wsIn, clrLocked, clrLockedFont, clrEditHasColor, clrEditable, clrMrsHeader, clrMrsSub, clrMrsOrder, clrFont
+    wsIn.Protect UW(49, 49, 52, 55, 48, 57)
+    wsMRS.Unprotect UW(49, 49, 52, 55, 48, 57)
+    ClearMRSArea wsMRS, clrLocked, clrFont
+    wsMRS.Protect UW(49, 49, 52, 55, 48, 57)
+    RefreshWorkbookColors
+    Exit Sub
+
+Cleanup:
+    On Error Resume Next
+    wsIn.Protect UW(49, 49, 52, 55, 48, 57)
+    wsMRS.Protect UW(49, 49, 52, 55, 48, 57)
+    Exit Sub
+EH:
+    Resume Cleanup
 End Sub
 
-Private Sub ClearMRSArea(ByVal wsMRS As Worksheet)
+Private Sub ClearMRSArea(ByVal wsMRS As Worksheet, ByVal clrLocked As Long, ByVal clrFont As Long)
     Dim rng As Range
+    Dim lastRow As Long
+
+    Set rng = BuildRowBoundRange(wsMRS, 3, 2, 14, 3)
+    lastRow = rng.Rows(rng.Rows.Count).Row
     On Error Resume Next
-    wsMRS.Range("B3:N20000").UnMerge
+    rng.UnMerge
     On Error GoTo 0
-    Set rng = wsMRS.Range("B3:N20000")
     rng.ClearContents
-    rng.Interior.Color = RGB(255, 230, 230)
     rng.Borders.LineStyle = xlNone
     rng.HorizontalAlignment = -4108
     rng.VerticalAlignment = -4108
     rng.Font.Size = 14
-    rng.Font.Color = RGB(0, 0, 0)
+    rng.Font.Color = clrFont
     rng.Font.Bold = False
     rng.NumberFormat = "General"
     rng.Locked = True
     rng.WrapText = False
-    wsMRS.Rows("3:20000").RowHeight = wsMRS.StandardHeight
+    wsMRS.Rows("3:" & lastRow).RowHeight = wsMRS.StandardHeight
 End Sub
+
 '@
 
 $inputSheetCode = @'
 Option Explicit
+
+Private mColorSignature As String
+
+Private Sub Worksheet_Activate()
+    mColorSignature = BuildColorSettingsSignature(Me)
+End Sub
+
+Private Sub Worksheet_SelectionChange(ByVal Target As Range)
+    On Error GoTo SafeExit
+
+    Dim currentSignature As String
+    currentSignature = BuildColorSettingsSignature(Me)
+
+    If mColorSignature = "" Then
+        mColorSignature = currentSignature
+    ElseIf StrComp(currentSignature, mColorSignature, vbBinaryCompare) <> 0 Then
+        Application.EnableEvents = False
+        RefreshWorkbookColors
+        mColorSignature = BuildColorSettingsSignature(Me)
+    End If
+
+SafeExit:
+    Application.EnableEvents = True
+End Sub
 
 Private Sub Worksheet_Change(ByVal Target As Range)
     On Error GoTo SafeExit
@@ -1900,6 +2464,7 @@ Private Sub Worksheet_Change(ByVal Target As Range)
     End If
 
 SafeExit:
+    mColorSignature = BuildColorSettingsSignature(Me)
     Me.Protect Chr(49) & Chr(49) & Chr(52) & Chr(55) & Chr(48) & Chr(57)
     Application.EnableEvents = True
 End Sub
@@ -1982,22 +2547,7 @@ End Sub
 
 $workbookCode = @'
 Private Sub Workbook_Open()
-    Dim wsIn As Worksheet, wsHist As Worksheet
-    Set wsIn = ThisWorkbook.Worksheets(1)
-    Set wsHist = ThisWorkbook.Worksheets(3)
-
-    Dim histLastRow As Long
-    histLastRow = wsHist.Cells(wsHist.Rows.Count, 2).End(xlUp).Row
-
-    wsIn.Unprotect Chr(49) & Chr(49) & Chr(52) & Chr(55) & Chr(48) & Chr(57)
-    If histLastRow <= 1 Then
-        wsIn.Cells(4, 13).Locked = True
-        wsIn.Cells(4, 13).Interior.Color = RGB(255, 230, 230)
-    Else
-        wsIn.Cells(4, 13).Locked = False
-        wsIn.Cells(4, 13).Interior.Pattern = xlNone
-    End If
-    wsIn.Protect Chr(49) & Chr(49) & Chr(52) & Chr(55) & Chr(48) & Chr(57)
+    RefreshWorkbookColors
 End Sub
 '@
 
@@ -2049,10 +2599,8 @@ try {
     $wsInput.Range("A1:O1").HorizontalAlignment = -4108  # xlCenter
     $wsInput.Range("A1:O1").VerticalAlignment = -4108     # xlCenter
     $wsInput.Rows(1).RowHeight = 50
-    $wsInput.Range("A1:O1").Interior.Pattern = -4142  # xlNone - clear bg
     # --- Separator row: merged A2:O2 ---
     $wsInput.Range("A2:O2").Merge() | Out-Null
-    $wsInput.Range("A2:O2").Interior.Pattern = -4142  # xlNone
 
     $wsInput.Range("A3").Value = (RU @(1053,1086,1084,1077,1088,32,1047,1072,1082,1072,1079,1072))
     $wsInput.Range("A4").Value = (RU @(1053,1072,1080,1084,1077,1085,1086,1074,1072,1085,1080,1077))
@@ -2428,7 +2976,6 @@ try {
     $wsHistory.Protect((RU 49,49,52,55,48,57), $true, $true, $false, $false)
 
     # --- Setup MRS sheet ---
-    $wsTechCards.Cells.Clear()
     $wsTechCards.Cells.Interior.Color = $lightRed
     $wsTechCards.Cells.HorizontalAlignment = -4108  # xlCenter
     $wsTechCards.Cells.VerticalAlignment = -4108     # xlCenter
@@ -2506,6 +3053,72 @@ try {
     $clearMrsBtn.Fill.ForeColor.RGB = 10066329  # gray
     $clearMrsBtn.Line.ForeColor.RGB = 3355443
     $clearMrsBtn.OnAction = "ClearMRS"
+
+    # --- Color settings (rows 30-36) ---
+    $wsInput.Range("A30:B30").Merge() | Out-Null
+    $wsInput.Range("A30").Value = (RU @(1053,1072,1089,1090,1088,1086,1081,1082,1080,32,1062,1074,1077,1090,1086,1074))  # "Настройки Цветов"
+    $wsInput.Range("A30").Font.Bold = $true
+
+    $wsInput.Cells.Item(31, 1).Value = (RU @(1047,1072,1073,1083,1086,1082,1080,1088,1086,1074,1072,1085,1085,1099,1077))                         # "Заблокированные"
+    $wsInput.Cells.Item(32, 1).Value = (RU @(1056,1077,1076,1072,1082,1090,1080,1088,1091,1077,1084,1099,1077))                                   # "Редактируемые"
+    $wsInput.Cells.Item(33, 1).Value = (RU @(1055,1072,1088,1089,1080,1085,1075,32,77,82,83,32,1044,1072,1090,1072))                              # "Парсинг MRS Дата"
+    $wsInput.Cells.Item(34, 1).Value = (RU @(1055,1072,1088,1089,1080,1085,1075,32,77,82,83,32,1041,1088,1080,1075,1072,1076,1072))               # "Парсинг MRS Бригада"
+    $wsInput.Cells.Item(35, 1).Value = (RU @(1055,1072,1088,1089,1080,1085,1075,32,77,82,83,32,1047,1072,1082,1072,1079))                         # "Парсинг MRS Заказ"
+    $wsInput.Cells.Item(36, 1).Value = (RU @(1062,1074,1077,1090,32,1058,1077,1082,1089,1090,1072))                                               # "Цвет Текста"
+
+    # Lock merged header row 30
+    $wsInput.Range("A30:B30").Locked = $true
+    # Lock label cells (A31:A36), unlock color sample cells (B31:B36)
+    for ($r = 31; $r -le 36; $r++) {
+        $wsInput.Cells.Item($r, 1).Locked = $true
+        $wsInput.Cells.Item($r, 2).Locked = $false
+    }
+
+    # Set default fill colors and borders in B column
+    $clrDefLocked    = 230*65536 + 230*256 + 255   # RGB(255,230,230) - same as $lightRed
+    $clrDefMrsHeader = 231*65536 + 198*256 + 180   # RGB(180,198,231)
+    $clrDefMrsSub    = 255*65536 + 220*256 + 200   # RGB(200,220,255)
+    $clrDefMrsOrder  = 200*65536 + 235*256 + 200   # RGB(200,235,200)
+    $clrDefFont      = 0                           # RGB(0,0,0) black
+
+    $wsInput.Cells.Item(31, 2).Interior.Color = $clrDefLocked
+    # Row 32 (Editable) - no fill by default (xlNone)
+    $wsInput.Cells.Item(32, 2).Interior.Pattern = -4142  # xlNone
+    $wsInput.Cells.Item(33, 2).Interior.Color = $clrDefMrsHeader
+    $wsInput.Cells.Item(34, 2).Interior.Color = $clrDefMrsSub
+    $wsInput.Cells.Item(35, 2).Interior.Color = $clrDefMrsOrder
+    $wsInput.Cells.Item(36, 2).Interior.Color = $clrDefFont
+
+    # Add borders to B31:B36
+    for ($r = 31; $r -le 36; $r++) {
+        $wsInput.Cells.Item($r, 2).Borders.LineStyle = 1  # xlContinuous
+    }
+
+    # --- Small "pick color" buttons in column C for rows 31-36 ---
+    $pickBtnNames = @(
+        @{ Row = 31; Action = "PickColorLocked" },
+        @{ Row = 32; Action = "PickColorEditable" },
+        @{ Row = 33; Action = "PickColorMrsHeader" },
+        @{ Row = 34; Action = "PickColorMrsSub" },
+        @{ Row = 35; Action = "PickColorMrsOrder" },
+        @{ Row = 36; Action = "PickColorFont" }
+    )
+    foreach ($btn in $pickBtnNames) {
+        $r = $btn.Row
+        $btnLeft   = [double]$wsInput.Cells.Item($r, 3).Left
+        $btnTop    = [double]$wsInput.Cells.Item($r, 3).Top + 1
+        $btnHeight = [double]$wsInput.Rows($r).RowHeight - 2
+        $btnWidth  = 20
+        $shape = $wsInput.Shapes.AddShape(1, $btnLeft, $btnTop, $btnWidth, $btnHeight)
+        $shape.Name = "btn_" + $btn.Action
+        $shape.TextFrame.Characters().Text = "..."
+        $shape.TextFrame.Characters().Font.Size = 8
+        $shape.TextFrame.HorizontalAlignment = -4108  # xlCenter
+        $shape.TextFrame.VerticalAlignment = -4108     # xlCenter
+        $shape.Fill.ForeColor.RGB = 15790320  # light gray
+        $shape.Line.ForeColor.RGB = 10066329  # darker gray
+        $shape.OnAction = $btn.Action
+    }
 
     # --- Protect input sheet (empty password) ---
     $wsInput.Protect((RU 49,49,52,55,48,57), $true, $true, $false, $false)
