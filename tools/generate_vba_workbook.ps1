@@ -2410,6 +2410,59 @@ Private Sub ClearMRSArea(ByVal wsMRS As Worksheet, ByVal clrLocked As Long, ByVa
     wsMRS.Rows("3:" & lastRow).RowHeight = wsMRS.StandardHeight
 End Sub
 
+Public Sub SaveHistorySheet()
+    ExportSheet ThisWorkbook.Worksheets(3), UW(1048, 1089, 1090, 1086, 1088, 1080, 1103, 95, 1056, 1072, 1089, 1095, 1077, 1090, 1086, 1074)
+End Sub
+
+Public Sub SaveMRSSheet()
+    ExportSheet ThisWorkbook.Worksheets(4), UW(1055, 1072, 1088, 1089, 1080, 1085, 1075, 95, 77, 82, 83)
+End Sub
+
+Private Sub ExportSheet(ByVal ws As Worksheet, ByVal defaultNamePrefix As String)
+    On Error GoTo EH
+    Dim savePath As Variant
+    Dim defaultName As String
+    Dim newWb As Workbook
+    Dim shp As Shape
+    
+    defaultName = defaultNamePrefix & "_" & Format(Now, "dd-mm-yyyy") & ".xlsx"
+    
+    savePath = Application.GetSaveAsFilename( _
+        InitialFileName:=defaultName, _
+        FileFilter:=UW(1060, 1072, 1081, 1083, 1099) & " Excel (*.xlsx), *.xlsx", _
+        Title:=UW(1057, 1086, 1093, 1088, 1072, 1085, 1080, 1090, 1100, 32, 1083, 1080, 1089, 1090) _
+    )
+    
+    If savePath = False Then Exit Sub
+    
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    
+    ws.Copy
+    Set newWb = ActiveWorkbook
+    
+    newWb.Sheets(1).Unprotect UW(49, 49, 52, 55, 48, 57)
+    
+    For Each shp In newWb.Sheets(1).Shapes
+        shp.Delete
+    Next shp
+    
+    newWb.Sheets(1).Protect UW(49, 49, 52, 55, 48, 57), True, True, False, False
+    
+    newWb.SaveAs Filename:=CStr(savePath), FileFormat:=51 ' xlOpenXMLWorkbook
+    newWb.Close SaveChanges:=False
+    
+    MsgBox UW(1060, 1072, 1081, 1083, 32, 1091, 1089, 1087, 1077, 1096, 1085, 1086, 32, 1089, 1086, 1093, 1088, 1072, 1085, 1077, 1085, 33), vbInformation
+    
+Cleanup:
+    Application.DisplayAlerts = True
+    Application.ScreenUpdating = True
+    Exit Sub
+EH:
+    MsgBox "Error: " & Err.Description, vbCritical
+    Resume Cleanup
+End Sub
+
 '@
 
 $inputSheetCode = @'
@@ -3028,6 +3081,7 @@ try {
     $wsHistory.Range("B1").Font.Bold = $true
     $wsHistory.Range("B1").Font.Size = 14
     $wsHistory.Range("B1:V1").Borders.LineStyle = 1  # xlContinuous
+    $wsHistory.Rows(1).RowHeight = 30
     $wsHistory.Cells.Font.Size = 14
     $wsHistory.Columns("A:A").ColumnWidth = 2.7
     $wsHistory.Columns("B:B").ColumnWidth = 3.5
@@ -3048,6 +3102,20 @@ try {
     $wsHistory.Columns("U:U").ColumnWidth = 16
     $wsHistory.Columns("V:V").ColumnWidth = 10
 
+    # --- History Save button ---
+    $btnHistSaveLeft = [double]$wsHistory.Range("T1").Left + 10
+    $btnHistSaveTop = [double]$wsHistory.Range("T1").Top + 4
+    $btnHistSaveWidth = 100
+    $btnHistSave = $wsHistory.Shapes.AddShape(1, $btnHistSaveLeft, $btnHistSaveTop, $btnHistSaveWidth, 22)
+    $btnHistSave.Name = "btnSaveHistory"
+    $btnHistSave.TextFrame.Characters().Text = (RU @(1057,1086,1093,1088,1072,1085,1080,1090,1100)) # "Сохранить"
+    $btnHistSave.TextFrame.HorizontalAlignment = -4108  # xlCenter
+    $btnHistSave.TextFrame.VerticalAlignment = -4108     # xlCenter
+    $btnHistSave.Fill.ForeColor.RGB = 12419407  # RGB(79,129,189) blue
+    $btnHistSave.Line.ForeColor.RGB = 3355443
+    $btnHistSave.TextFrame.Characters().Font.Color = 16777215  # white
+    $btnHistSave.OnAction = "SaveHistorySheet"
+
     # --- History sheet formatting (same as Result) ---
     $wsHistory.Cells.Interior.Color = $lightRed
     $wsHistory.Cells.HorizontalAlignment = -4108  # xlCenter
@@ -3067,6 +3135,7 @@ try {
     $wsTechCards.Range("B1").Value = (RU @(1055,1072,1088,1089,1080,1085,1075,32,77,82,83))  # Парсинг MRS
     $wsTechCards.Range("B1").Font.Bold = $true
     $wsTechCards.Range("B1:N1").Borders.LineStyle = 1
+    $wsTechCards.Rows(1).RowHeight = 30
 
     # Row 2 = empty separator
     # Column headers are written per-block in VBA LoadMRS
@@ -3086,6 +3155,21 @@ try {
     $wsTechCards.Columns("L:L").ColumnWidth = 24
     $wsTechCards.Columns("M:M").ColumnWidth = 24
     $wsTechCards.Columns("N:N").ColumnWidth = 10
+
+    # --- MRS Save button ---
+    $btnMrsSaveLeft = [double]$wsTechCards.Range("L1").Left + 10
+    $btnMrsSaveTop = [double]$wsTechCards.Range("L1").Top + 4
+    $btnMrsSaveWidth = 100
+    $btnMrsSave = $wsTechCards.Shapes.AddShape(1, $btnMrsSaveLeft, $btnMrsSaveTop, $btnMrsSaveWidth, 22)
+    $btnMrsSave.Name = "btnSaveMRS"
+    $btnMrsSave.TextFrame.Characters().Text = (RU @(1057,1086,1093,1088,1072,1085,1080,1090,1100)) # "Сохранить"
+    $btnMrsSave.TextFrame.HorizontalAlignment = -4108  # xlCenter
+    $btnMrsSave.TextFrame.VerticalAlignment = -4108     # xlCenter
+    $btnMrsSave.Fill.ForeColor.RGB = 12419407  # RGB(79,129,189) blue
+    $btnMrsSave.Line.ForeColor.RGB = 3355443
+    $btnMrsSave.TextFrame.Characters().Font.Color = 16777215  # white
+    $btnMrsSave.OnAction = "SaveMRSSheet"
+
     $wsTechCards.Protect((RU 49,49,52,55,48,57), $true, $true, $false, $false)
 
     $buttonLeft = [double]$wsInput.Range("A19").Left

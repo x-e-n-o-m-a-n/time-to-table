@@ -2400,4 +2400,57 @@ Private Sub ClearMRSArea(ByVal wsMRS As Worksheet, ByVal clrLocked As Long, ByVa
     wsMRS.Rows("3:" & lastRow).RowHeight = wsMRS.StandardHeight
 End Sub
 
+Public Sub SaveHistorySheet()
+    ExportSheet ThisWorkbook.Worksheets(3), UW(1048, 1089, 1090, 1086, 1088, 1080, 1103, 95, 1056, 1072, 1089, 1095, 1077, 1090, 1086, 1074)
+End Sub
+
+Public Sub SaveMRSSheet()
+    ExportSheet ThisWorkbook.Worksheets(4), UW(1055, 1072, 1088, 1089, 1080, 1085, 1075, 95, 77, 82, 83)
+End Sub
+
+Private Sub ExportSheet(ByVal ws As Worksheet, ByVal defaultNamePrefix As String)
+    On Error GoTo EH
+    Dim savePath As Variant
+    Dim defaultName As String
+    Dim newWb As Workbook
+    Dim shp As Shape
+    
+    defaultName = defaultNamePrefix & "_" & Format(Now, "dd-mm-yyyy") & ".xlsx"
+    
+    savePath = Application.GetSaveAsFilename( _
+        InitialFileName:=defaultName, _
+        FileFilter:=UW(1060, 1072, 1081, 1083, 1099) & " Excel (*.xlsx), *.xlsx", _
+        Title:=UW(1057, 1086, 1093, 1088, 1072, 1085, 1080, 1090, 1100, 32, 1083, 1080, 1089, 1090) _
+    )
+    
+    If savePath = False Then Exit Sub
+    
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    
+    ws.Copy
+    Set newWb = ActiveWorkbook
+    
+    newWb.Sheets(1).Unprotect UW(49, 49, 52, 55, 48, 57)
+    
+    For Each shp In newWb.Sheets(1).Shapes
+        shp.Delete
+    Next shp
+    
+    newWb.Sheets(1).Protect UW(49, 49, 52, 55, 48, 57), True, True, False, False
+    
+    newWb.SaveAs Filename:=CStr(savePath), FileFormat:=51 ' xlOpenXMLWorkbook
+    newWb.Close SaveChanges:=False
+    
+    MsgBox UW(1060, 1072, 1081, 1083, 32, 1091, 1089, 1087, 1077, 1096, 1085, 1086, 32, 1089, 1086, 1093, 1088, 1072, 1085, 1077, 1085, 33), vbInformation
+    
+Cleanup:
+    Application.DisplayAlerts = True
+    Application.ScreenUpdating = True
+    Exit Sub
+EH:
+    MsgBox "Error: " & Err.Description, vbCritical
+    Resume Cleanup
+End Sub
+
 
