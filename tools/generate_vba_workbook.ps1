@@ -1695,6 +1695,9 @@ Public Sub LoadMRS()
 
     Application.ScreenUpdating = False
     Application.EnableEvents = False
+    Dim calcState As Long
+    calcState = Application.Calculation
+    Application.Calculation = xlCalculationManual
     wsMRS.Unprotect UW(49, 49, 52, 55, 48, 57)
     stage = "Clear MRS sheet"
     ClearMRSArea wsMRS, clrLocked, clrFont
@@ -1749,6 +1752,11 @@ Public Sub LoadMRS()
     Dim tmpOrder As String
     validCount = 0
     For i = 1 To totalRows
+        If i Mod 1000 = 0 Then
+            Application.StatusBar = UW(1055, 1072, 1088, 1089, 1080, 1085, 1075, 32, 77, 82, 83, 58, 32, 1063, 1090, 1077, 1085, 1080, 1077, 32, 1076, 1072, 1085, 1085, 1099, 1093, 32) & Int((i / totalRows) * 100) & "%"
+            DoEvents
+        End If
+        If IsError(data(i + 1, 5)) Then GoTo NextRow
         assignVal = CStr(data(i + 1, 5))
         slashPos = InStr(assignVal, "/")
         If slashPos > 0 Then
@@ -1766,41 +1774,41 @@ Public Sub LoadMRS()
             arrOrder(validCount) = tmpOrder
             arrOp(validCount) = ""
         End If
-        arrWName(validCount) = CStr(data(i + 1, 3))
-        arrWID(validCount) = CStr(data(i + 1, 4))
-        If Not IsEmpty(data(i + 1, 8)) Then
+        If Not IsError(data(i + 1, 3)) Then arrWName(validCount) = CStr(data(i + 1, 3)) Else arrWName(validCount) = ""
+        If Not IsError(data(i + 1, 4)) Then arrWID(validCount) = CStr(data(i + 1, 4)) Else arrWID(validCount) = ""
+        If Not IsEmpty(data(i + 1, 8)) And Not IsError(data(i + 1, 8)) Then
             If IsDate(data(i + 1, 8)) Then
                 arrSDate(validCount) = CDate(data(i + 1, 8))
             ElseIf IsNumeric(data(i + 1, 8)) Then
                 arrSDate(validCount) = CDate(CDbl(data(i + 1, 8)))
             End If
         End If
-        If Not IsEmpty(data(i + 1, 9)) Then
+        If Not IsEmpty(data(i + 1, 9)) And Not IsError(data(i + 1, 9)) Then
             If IsDate(data(i + 1, 9)) Then
                 arrSTime(validCount) = CDate(data(i + 1, 9))
             ElseIf IsNumeric(data(i + 1, 9)) Then
                 arrSTime(validCount) = CDate(CDbl(data(i + 1, 9)))
             End If
         End If
-        If Not IsEmpty(data(i + 1, 10)) Then
+        If Not IsEmpty(data(i + 1, 10)) And Not IsError(data(i + 1, 10)) Then
             If IsDate(data(i + 1, 10)) Then
                 arrEDate(validCount) = CDate(data(i + 1, 10))
             ElseIf IsNumeric(data(i + 1, 10)) Then
                 arrEDate(validCount) = CDate(CDbl(data(i + 1, 10)))
             End If
         End If
-        If Not IsEmpty(data(i + 1, 11)) Then
+        If Not IsEmpty(data(i + 1, 11)) And Not IsError(data(i + 1, 11)) Then
             If IsDate(data(i + 1, 11)) Then
                 arrETime(validCount) = CDate(data(i + 1, 11))
             ElseIf IsNumeric(data(i + 1, 11)) Then
                 arrETime(validCount) = CDate(CDbl(data(i + 1, 11)))
             End If
         End If
-        If Not IsEmpty(data(i + 1, 12)) Then
+        If Not IsEmpty(data(i + 1, 12)) And Not IsError(data(i + 1, 12)) Then
             If IsNumeric(data(i + 1, 12)) Then arrDur(validCount) = CDbl(data(i + 1, 12))
         End If
-        arrWPlace(validCount) = CStr(data(i + 1, 14))
-        arrPDTV(validCount) = CStr(data(i + 1, 16))
+        If Not IsError(data(i + 1, 14)) Then arrWPlace(validCount) = CStr(data(i + 1, 14)) Else arrWPlace(validCount) = ""
+        If Not IsError(data(i + 1, 16)) Then arrPDTV(validCount) = CStr(data(i + 1, 16)) Else arrPDTV(validCount) = ""
 NextRow:
     Next i
 
@@ -1832,15 +1840,7 @@ NextRow:
         kd = kd + 1
         dateKeys(kd) = CLng(dk)
     Next dk
-    For i = 1 To dateCount - 1
-        Dim jd As Long
-        For jd = 1 To dateCount - i
-            If dateKeys(jd) > dateKeys(jd + 1) Then
-                Dim tmpDateKey As Long
-                tmpDateKey = dateKeys(jd): dateKeys(jd) = dateKeys(jd + 1): dateKeys(jd + 1) = tmpDateKey
-            End If
-        Next jd
-    Next i
+    If dateCount > 1 Then QuickSortLong dateKeys, 1, dateCount
 
     Dim outRow As Long
     outRow = 2
@@ -1849,6 +1849,9 @@ NextRow:
     For d = 1 To dateCount
         Dim curDateKey As Long
         curDateKey = dateKeys(d)
+
+        Application.StatusBar = UW(1055, 1072, 1088, 1089, 1080, 1085, 1075, 32, 77, 82, 83, 58, 32, 1060, 1086, 1088, 1084, 1080, 1088, 1086, 1074, 1072, 1085, 1080, 1077, 32, 1074, 1099, 1074, 1086, 1076, 1072, 32) & Int((d / dateCount) * 100) & "%"
+        DoEvents
 
         ' Date header
         stage = "Write date header " & CStr(d)
@@ -1899,17 +1902,8 @@ SkipDateRow:
         wIds = dictOrderW(key).Keys
         Dim wCount As Long
         wCount = dictOrderW(key).Count
-        ' Sort worker IDs (bubble sort on Variant array)
-        Dim j As Long, tmpS As String
-        If wCount > 1 Then
-            For i = 0 To wCount - 2
-                For j = 0 To wCount - 2 - i
-                    If CStr(wIds(j)) > CStr(wIds(j + 1)) Then
-                        tmpS = wIds(j): wIds(j) = wIds(j + 1): wIds(j + 1) = tmpS
-                    End If
-                Next j
-            Next i
-        End If
+        If wCount > 1 Then QuickSortVariantStrings wIds, 0, wCount - 1
+
         Dim bKey As String: bKey = ""
         For i = 0 To wCount - 1
             If i > 0 Then bKey = bKey & ","
@@ -1956,15 +1950,7 @@ SkipDateRow:
         brigTimes(k) = CDbl(dictBrigTime(key))
     Next key
 
-    Dim tmpD As Double
-    For i = 1 To brigCount - 1
-        For j = 1 To brigCount - i
-            If brigTimes(j) > brigTimes(j + 1) Then
-                tmpD = brigTimes(j): brigTimes(j) = brigTimes(j + 1): brigTimes(j + 1) = tmpD
-                tmpS = brigKeys(j): brigKeys(j) = brigKeys(j + 1): brigKeys(j + 1) = tmpS
-            End If
-        Next j
-    Next i
+    If brigCount > 1 Then QuickSortDoubleString brigTimes, brigKeys, 1, brigCount
 
     ' === Step 5: Write blocks ===
     stage = "Write brigade blocks for date " & CStr(d)
@@ -2016,14 +2002,7 @@ SkipDateRow:
             ordKeys(k) = CStr(oKey)
             ordTimes(k) = CDbl(dictBrigades(curBrigKey)(oKey))
         Next oKey
-        For i = 1 To ordInBrig - 1
-            For j = 1 To ordInBrig - i
-                If ordTimes(j) > ordTimes(j + 1) Then
-                    tmpD = ordTimes(j): ordTimes(j) = ordTimes(j + 1): ordTimes(j + 1) = tmpD
-                    tmpS = ordKeys(j): ordKeys(j) = ordKeys(j + 1): ordKeys(j + 1) = tmpS
-                End If
-            Next j
-        Next i
+        If ordInBrig > 1 Then QuickSortDoubleString ordTimes, ordKeys, 1, ordInBrig
 
         ' Per-worker tracking: workerID -> last output row number
         Dim dictWorkerLastRow As Object
@@ -2039,38 +2018,17 @@ SkipDateRow:
 
             ' Collect row indices for this order
             Dim blkIdx() As Long, blkCnt As Long
+            ReDim blkIdx(1 To totalRows)
             blkCnt = 0
             For i = 1 To totalRows
                 If arrOrder(i) = curOrder And CLng(arrSDate(i)) = curDateKey Then
                     blkCnt = blkCnt + 1
-                    ReDim Preserve blkIdx(1 To blkCnt)
                     blkIdx(blkCnt) = i
                 End If
             Next i
 
             ' Sort by start time, then operation, then worker ID
-            Dim doSwap As Boolean
-            Dim tmpL As Long
-            Dim tA As Double, tB As Double
-            For i = 1 To blkCnt - 1
-                For j = 1 To blkCnt - i
-                    doSwap = False
-                    tA = CDbl(arrSDate(blkIdx(j))) + CDbl(arrSTime(blkIdx(j)))
-                    tB = CDbl(arrSDate(blkIdx(j + 1))) + CDbl(arrSTime(blkIdx(j + 1)))
-                    If tA > tB Then
-                        doSwap = True
-                    ElseIf tA = tB Then
-                        If arrOp(blkIdx(j)) > arrOp(blkIdx(j + 1)) Then
-                            doSwap = True
-                        ElseIf arrOp(blkIdx(j)) = arrOp(blkIdx(j + 1)) Then
-                            If arrWID(blkIdx(j)) > arrWID(blkIdx(j + 1)) Then doSwap = True
-                        End If
-                    End If
-                    If doSwap Then
-                        tmpL = blkIdx(j): blkIdx(j) = blkIdx(j + 1): blkIdx(j + 1) = tmpL
-                    End If
-                Next j
-            Next i
+            If blkCnt > 1 Then QuickSortIndices blkIdx, arrSDate, arrSTime, arrOp, arrWID, 1, blkCnt
 
             Dim fIdx As Long
             fIdx = blkIdx(1)
@@ -2289,6 +2247,7 @@ SkipDateRow:
     Next d
 
     ' Apply formatting to used area
+    Application.StatusBar = UW(1055, 1072, 1088, 1089, 1080, 1085, 1075, 32, 77, 82, 83, 58, 32, 1047, 1072, 1074, 1077, 1088, 1096, 1077, 1085, 1080, 1077, 32, 1092, 1086, 1088, 1084, 1072, 1090, 1080, 1088, 1086, 1074, 1072, 1085, 1080, 1103, 46, 46, 46)
     stage = "Finalize MRS formatting"
     Dim dataRange As Range
     Set dataRange = wsMRS.Range(wsMRS.Cells(3, 2), wsMRS.Cells(outRow, 14))
@@ -2347,6 +2306,8 @@ Done:
     wsMRS.Protect UW(49, 49, 52, 55, 48, 57)
     Application.EnableEvents = True
     Application.ScreenUpdating = True
+    Application.Calculation = calcState
+    Application.StatusBar = False
     On Error GoTo 0
     If Len(errMsg) > 0 Then
         MsgBox UW(1054, 1096, 1080, 1073, 1082, 1072, 58, 32) & errMsg, vbCritical
@@ -2356,6 +2317,108 @@ EH:
     errMsg = stage & " | " & Err.Description
     Resume Done
 End Sub
+
+' ==========================================
+' QUICKSORT HELPERS
+' ==========================================
+Private Sub QuickSortLong(arr() As Long, ByVal first As Long, ByVal last As Long)
+    Dim pivot As Long, temp As Long
+    Dim i As Long, j As Long
+    If first >= last Then Exit Sub
+    pivot = arr((first + last) \ 2)
+    i = first: j = last
+    Do While i <= j
+        Do While arr(i) < pivot: i = i + 1: Loop
+        Do While arr(j) > pivot: j = j - 1: Loop
+        If i <= j Then
+            temp = arr(i): arr(i) = arr(j): arr(j) = temp
+            i = i + 1: j = j - 1
+        End If
+    Loop
+    If first < j Then QuickSortLong arr, first, j
+    If i < last Then QuickSortLong arr, i, last
+End Sub
+
+Private Sub QuickSortVariantStrings(arr As Variant, ByVal first As Long, ByVal last As Long)
+    Dim pivot As String, temp As Variant
+    Dim i As Long, j As Long
+    If first >= last Then Exit Sub
+    pivot = CStr(arr((first + last) \ 2))
+    i = first: j = last
+    Do While i <= j
+        Do While CStr(arr(i)) < pivot: i = i + 1: Loop
+        Do While CStr(arr(j)) > pivot: j = j - 1: Loop
+        If i <= j Then
+            temp = arr(i): arr(i) = arr(j): arr(j) = temp
+            i = i + 1: j = j - 1
+        End If
+    Loop
+    If first < j Then QuickSortVariantStrings arr, first, j
+    If i < last Then QuickSortVariantStrings arr, i, last
+End Sub
+
+Private Sub QuickSortDoubleString(arrD() As Double, arrS() As String, ByVal first As Long, ByVal last As Long)
+    Dim pivotD As Double, tempD As Double, tempS As String
+    Dim i As Long, j As Long
+    If first >= last Then Exit Sub
+    pivotD = arrD((first + last) \ 2)
+    i = first: j = last
+    Do While i <= j
+        Do While arrD(i) < pivotD: i = i + 1: Loop
+        Do While arrD(j) > pivotD: j = j - 1: Loop
+        If i <= j Then
+            tempD = arrD(i): arrD(i) = arrD(j): arrD(j) = tempD
+            tempS = arrS(i): arrS(i) = arrS(j): arrS(j) = tempS
+            i = i + 1: j = j - 1
+        End If
+    Loop
+    If first < j Then QuickSortDoubleString arrD, arrS, first, j
+    If i < last Then QuickSortDoubleString arrD, arrS, i, last
+End Sub
+
+Private Sub QuickSortIndices(idx() As Long, arrSDate() As Date, arrSTime() As Date, arrOp() As String, arrWID() As String, ByVal first As Long, ByVal last As Long)
+    Dim pivotValA As Double, pivotValB As String, pivotValC As String
+    Dim i As Long, j As Long, temp As Long
+    If first >= last Then Exit Sub
+    Dim midIdx As Long
+    midIdx = idx((first + last) \ 2)
+    pivotValA = CDbl(arrSDate(midIdx)) + CDbl(arrSTime(midIdx))
+    pivotValB = arrOp(midIdx)
+    pivotValC = arrWID(midIdx)
+    i = first: j = last
+    Do While i <= j
+        Do While CompareIndices(idx(i), pivotValA, pivotValB, pivotValC, arrSDate, arrSTime, arrOp, arrWID) < 0: i = i + 1: Loop
+        Do While CompareIndices(idx(j), pivotValA, pivotValB, pivotValC, arrSDate, arrSTime, arrOp, arrWID) > 0: j = j - 1: Loop
+        If i <= j Then
+            temp = idx(i): idx(i) = idx(j): idx(j) = temp
+            i = i + 1: j = j - 1
+        End If
+    Loop
+    If first < j Then QuickSortIndices idx, arrSDate, arrSTime, arrOp, arrWID, first, j
+    If i < last Then QuickSortIndices idx, arrSDate, arrSTime, arrOp, arrWID, i, last
+End Sub
+
+Private Function CompareIndices(idxA As Long, pA As Double, pB As String, pC As String, _
+    arrSDate() As Date, arrSTime() As Date, arrOp() As String, arrWID() As String) As Integer
+    Dim vA As Double
+    vA = CDbl(arrSDate(idxA)) + CDbl(arrSTime(idxA))
+    If vA < pA Then
+        CompareIndices = -1: Exit Function
+    ElseIf vA > pA Then
+        CompareIndices = 1: Exit Function
+    End If
+    If arrOp(idxA) < pB Then
+        CompareIndices = -1: Exit Function
+    ElseIf arrOp(idxA) > pB Then
+        CompareIndices = 1: Exit Function
+    End If
+    If arrWID(idxA) < pC Then
+        CompareIndices = -1: Exit Function
+    ElseIf arrWID(idxA) > pC Then
+        CompareIndices = 1: Exit Function
+    End If
+    CompareIndices = 0
+End Function
 
 Public Sub ClearMRS()
     If Not ZQ() Then
