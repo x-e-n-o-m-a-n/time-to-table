@@ -170,7 +170,7 @@ Private Sub SyncPauseInputCell(ByVal wsIn As Worksheet, ByVal wsHist As Workshee
     Dim histLastRow As Long
     histLastRow = wsHist.Cells(wsHist.Rows.Count, 2).End(xlUp).Row
 
-    If histLastRow <= 1 Then
+    If histLastRow <= 2 Then
         wsIn.Cells(4, 13).Locked = True
         ApplyLockedStyle wsIn.Cells(4, 13), clrLocked, clrLockedFont
     Else
@@ -400,8 +400,8 @@ Private Function ZQ() As Boolean
     If Len(v) < 2 Then Exit Function
     Dim ec As Variant
     ec = Array(181, 239, 280, 309, 329, 208, 218, 268, 306, 353, 198, 179, 257, 274, 310, 129, _
-               1177, 1243, 1291, 1325, 1181, 1213, 1274, 1293, 1331, 1171, 166, 1214, 254, _
-               1301, 143, 166, 221, 256, 295, 151)
+               232, 292, 240, 1288, 1169, 1217, 1251, 1292, 1324, 1200, 1219, 1257, 1282, _
+               277, 1140, 180, 1227, 254)
     If UBound(ec) - LBound(ec) + 1 <> Len(v) Then Exit Function
     Dim xV As String, j As Long
     For j = LBound(ec) To UBound(ec)
@@ -770,7 +770,7 @@ Private Sub ClearHistoryArea(ByVal wsHist As Worksheet, ByVal clrLocked As Long,
     Dim rng As Range
     Dim lastRow As Long
 
-    Set rng = BuildRowBoundRange(wsHist, 2, 2, 22, 2)
+    Set rng = BuildRowBoundRange(wsHist, 3, 2, 22, 3)
     lastRow = rng.Rows(rng.Rows.Count).Row
     Application.EnableEvents = False
     On Error Resume Next
@@ -786,7 +786,7 @@ Private Sub ClearHistoryArea(ByVal wsHist As Worksheet, ByVal clrLocked As Long,
     rng.NumberFormat = "General"
     rng.Locked = True
     rng.WrapText = False
-    wsHist.Rows("2:" & lastRow).RowHeight = wsHist.StandardHeight
+    wsHist.Rows("3:" & lastRow).RowHeight = wsHist.StandardHeight
     Application.EnableEvents = True
 End Sub
 
@@ -868,7 +868,7 @@ Public Sub SyncOperationRows(ByVal wsIn As Worksheet, ByVal opCount As Long)
             Set wsHist = ThisWorkbook.Worksheets(3)
             Dim histLastRow As Long
             histLastRow = wsHist.Cells(wsHist.Rows.Count, 2).End(xlUp).Row
-            If histLastRow <= 1 Then
+            If histLastRow <= 2 Then
                 wsIn.Cells(r, 13).Locked = True
                 wsIn.Cells(r, 13).Interior.Color = clrLocked
             End If
@@ -1656,6 +1656,11 @@ Public Sub LoadMRS()
     Dim stage As String
     stage = "LoadMRS start"
 
+    ' Предварительная очистка листа Парсинг MRS перед началом парсинга
+    Application.ScreenUpdating = True
+    ClearMRS
+    DoEvents
+
     Dim wsMRS As Worksheet
     Set wsMRS = ThisWorkbook.Worksheets(4)
 
@@ -1689,8 +1694,6 @@ Public Sub LoadMRS()
     calcState = Application.Calculation
     Application.Calculation = xlCalculationManual
     wsMRS.Unprotect UW(49, 49, 52, 55, 48, 57)
-    stage = "Clear MRS sheet"
-    ClearMRSArea wsMRS, clrLocked, clrFont
 
     Dim srcWb As Workbook
     stage = "Open source workbook"
@@ -1832,6 +1835,87 @@ NextRow:
     Next dk
     If dateCount > 1 Then QuickSortLong dateKeys, 1, dateCount
 
+    ' === Step 0.5: Prompt User for Dates ===
+    stage = "Prompt for dates"
+    If dateCount > 1 Then
+        Dim dlgDate As Object
+        Set dlgDate = ThisWorkbook.DialogSheets.Add
+        dlgDate.DialogFrame.Width = 1000
+        dlgDate.DialogFrame.Height = 500
+        dlgDate.DialogFrame.Characters.Text = ""
+        
+        Dim lblDateDesc As Object
+        Set lblDateDesc = dlgDate.Labels.Add(dlgDate.DialogFrame.Left + 15, dlgDate.DialogFrame.Top + 15, dlgDate.DialogFrame.Width - 120, 35)
+        lblDateDesc.Text = UW(1042, 1099, 1073, 1077, 1088, 1080, 1090, 1077, 32, 1076, 1085, 1080, 32, 1076, 1083, 1103, 32, 1079, 1072, 1075, 1088, 1091, 1079, 1082, 1080, 58, 10, 40, 1050, 1083, 1080, 1082, 1085, 1080, 1090, 1077, 32, 1087, 1086, 32, 1089, 1090, 1088, 1086, 1082, 1072, 1084, 32, 1076, 1083, 1103, 32, 1074, 1099, 1073, 1086, 1088, 1072, 32, 1085, 1077, 1089, 1082, 1086, 1083, 1100, 1082, 1080, 1093, 41)
+        
+        Dim dBtnDate As Object
+        Dim btnDateTop As Double
+        btnDateTop = dlgDate.DialogFrame.Top + 20
+        For Each dBtnDate In dlgDate.Buttons
+            dBtnDate.Left = dlgDate.DialogFrame.Left + dlgDate.DialogFrame.Width - dBtnDate.Width - 15
+            dBtnDate.Top = btnDateTop
+            btnDateTop = btnDateTop + dBtnDate.Height + 10
+        Next dBtnDate
+        
+        Dim lbDate As Object
+        Set lbDate = dlgDate.ListBoxes.Add(dlgDate.DialogFrame.Left + 15, dlgDate.DialogFrame.Top + 55, dlgDate.DialogFrame.Width - 120, dlgDate.DialogFrame.Height - 100)
+        lbDate.MultiSelect = xlSimple
+        
+        Dim btnDateSelAll As Object
+        Set btnDateSelAll = dlgDate.Buttons.Add(dlgDate.DialogFrame.Left + 15, dlgDate.DialogFrame.Top + dlgDate.DialogFrame.Height - 35, 120, 22)
+        btnDateSelAll.Caption = UW(1042, 1099, 1073, 1088, 1072, 1090, 1100, 32, 1074, 1089, 1077)
+        btnDateSelAll.OnAction = "SelectAllBrigades"
+        
+        Dim btnDateClearAll As Object
+        Set btnDateClearAll = dlgDate.Buttons.Add(dlgDate.DialogFrame.Left + 145, dlgDate.DialogFrame.Top + dlgDate.DialogFrame.Height - 35, 120, 22)
+        btnDateClearAll.Caption = UW(1054, 1095, 1080, 1089, 1090, 1080, 1090, 1100, 32, 1074, 1099, 1073, 1086, 1088)
+        btnDateClearAll.OnAction = "ClearAllBrigades"
+        
+        Dim dIdx As Long
+        For dIdx = 1 To dateCount
+            lbDate.AddItem Format(CDate(CDbl(dateKeys(dIdx))), "dd"".""mm"".""yyyy")
+        Next dIdx
+        
+        Application.ScreenUpdating = True
+        Dim dlgDateResult As Boolean
+        dlgDateResult = dlgDate.Show
+        Application.ScreenUpdating = False
+        
+        Dim anyDateSel As Boolean: anyDateSel = False
+        Dim newDateCount As Long: newDateCount = 0
+        Dim newDateKeys() As Long
+        ReDim newDateKeys(1 To dateCount)
+        
+        If dlgDateResult Then
+            For dIdx = 1 To dateCount
+                If lbDate.Selected(dIdx) Then
+                    anyDateSel = True
+                    newDateCount = newDateCount + 1
+                    newDateKeys(newDateCount) = dateKeys(dIdx)
+                End If
+            Next dIdx
+        Else
+            Application.DisplayAlerts = False
+            dlgDate.Delete
+            Application.DisplayAlerts = True
+            GoTo Done
+        End If
+        
+        If Not anyDateSel Then
+            Application.DisplayAlerts = False
+            dlgDate.Delete
+            Application.DisplayAlerts = True
+            GoTo Done
+        End If
+        
+        Application.DisplayAlerts = False
+        dlgDate.Delete
+        Application.DisplayAlerts = True
+        
+        dateCount = newDateCount
+        dateKeys = newDateKeys
+    End If
+
     Dim outRow As Long
     outRow = 2
 
@@ -1942,29 +2026,123 @@ SkipDateRow:
 
     If brigCount > 1 Then QuickSortDoubleString brigTimes, brigKeys, 1, brigCount
 
+    ' === Step 4.5: Prompt User for Brigades ===
+    stage = "Prompt for brigades date " & CStr(d)
+    Dim brigNames() As String
+    ReDim brigNames(1 To brigCount)
+    Dim selBrig() As Boolean
+    ReDim selBrig(1 To brigCount)
+    
+    Dim bDisp As Long
+    For bDisp = 1 To brigCount
+        Dim tmpBrigKey As String
+        tmpBrigKey = brigKeys(bDisp)
+        Dim tmpWorkerIds As Variant
+        tmpWorkerIds = Split(tmpBrigKey, ",")
+        Dim tmpFirstOrd As Variant
+        For Each tmpFirstOrd In dictBrigades(tmpBrigKey).Keys: Exit For: Next
+        Dim tmpWStr As String: tmpWStr = ""
+        Dim twi As Long
+        For twi = 0 To UBound(tmpWorkerIds)
+            If twi > 0 Then tmpWStr = tmpWStr & ", "
+            Dim tmpWName As String: tmpWName = ""
+            If dictOrderW(CStr(tmpFirstOrd)).Exists(CStr(tmpWorkerIds(twi))) Then
+                tmpWName = dictOrderW(CStr(tmpFirstOrd))(CStr(tmpWorkerIds(twi)))
+            End If
+            tmpWStr = tmpWStr & tmpWName & " (" & tmpWorkerIds(twi) & ")"
+        Next twi
+        brigNames(bDisp) = tmpWStr
+    Next bDisp
+    
+    If brigCount = 1 Then
+        selBrig(1) = True
+    Else
+        Dim dlg As Object
+        Set dlg = ThisWorkbook.DialogSheets.Add
+        dlg.DialogFrame.Width = 1000
+        dlg.DialogFrame.Height = 500
+        dlg.DialogFrame.Characters.Text = ""
+        
+        Dim lblDesc As Object
+        Set lblDesc = dlg.Labels.Add(dlg.DialogFrame.Left + 15, dlg.DialogFrame.Top + 15, dlg.DialogFrame.Width - 120, 35)
+        lblDesc.Text = UW(1042, 1099, 1073, 1077, 1088, 1080, 1090, 1077, 32, 1073, 1088, 1080, 1075, 1072, 1076, 1099, 32, 1085, 1072, 32) & Format(CDate(CDbl(curDateKey)), "dd"".""mm"".""yyyy") & UW(58, 10, 40, 1050, 1083, 1080, 1082, 1085, 1080, 1090, 1077, 32, 1087, 1086, 32, 1089, 1090, 1088, 1086, 1082, 1072, 1084, 32, 1076, 1083, 1103, 32, 1074, 1099, 1073, 1086, 1088, 1072, 32, 1085, 1077, 1089, 1082, 1086, 1083, 1100, 1082, 1080, 1093, 41)
+        
+        Dim dBtn As Object
+        Dim btnTop As Double
+        btnTop = dlg.DialogFrame.Top + 20
+        For Each dBtn In dlg.Buttons
+            dBtn.Left = dlg.DialogFrame.Left + dlg.DialogFrame.Width - dBtn.Width - 15
+            dBtn.Top = btnTop
+            btnTop = btnTop + dBtn.Height + 10
+        Next dBtn
+        
+        Dim lb As Object
+        Set lb = dlg.ListBoxes.Add(dlg.DialogFrame.Left + 15, dlg.DialogFrame.Top + 55, dlg.DialogFrame.Width - 120, dlg.DialogFrame.Height - 100)
+        lb.MultiSelect = xlSimple ' Корректная нативная константа Excel (-4108) для множественного выбора кликом
+        
+        Dim btnSelAll As Object
+        Set btnSelAll = dlg.Buttons.Add(dlg.DialogFrame.Left + 15, dlg.DialogFrame.Top + dlg.DialogFrame.Height - 35, 120, 22)
+        btnSelAll.Caption = UW(1042, 1099, 1073, 1088, 1072, 1090, 1100, 32, 1074, 1089, 1077)
+        btnSelAll.OnAction = "SelectAllBrigades"
+        
+        Dim btnClearAll As Object
+        Set btnClearAll = dlg.Buttons.Add(dlg.DialogFrame.Left + 145, dlg.DialogFrame.Top + dlg.DialogFrame.Height - 35, 120, 22)
+        btnClearAll.Caption = UW(1054, 1095, 1080, 1089, 1090, 1080, 1090, 1100, 32, 1074, 1099, 1073, 1086, 1088)
+        btnClearAll.OnAction = "ClearAllBrigades"
+        
+        For bDisp = 1 To brigCount
+            lb.AddItem brigNames(bDisp)
+        Next bDisp
+        
+        Application.ScreenUpdating = True
+        Dim dlgResult As Boolean
+        dlgResult = dlg.Show
+        Application.ScreenUpdating = False
+        
+        Dim anySel As Boolean: anySel = False
+        If dlgResult Then
+            For bDisp = 1 To brigCount
+                If lb.Selected(bDisp) Then
+                    selBrig(bDisp) = True
+                    anySel = True
+                End If
+            Next bDisp
+        Else
+            Application.DisplayAlerts = False
+            dlg.Delete
+            Application.DisplayAlerts = True
+            wsMRS.Rows(outRow).Clear
+            wsMRS.Rows(outRow).RowHeight = wsMRS.StandardHeight
+            outRow = outRow - 1
+            GoTo Done
+        End If
+        
+        If Not anySel Then
+            Application.DisplayAlerts = False
+            dlg.Delete
+            Application.DisplayAlerts = True
+            wsMRS.Rows(outRow).Clear
+            wsMRS.Rows(outRow).RowHeight = wsMRS.StandardHeight
+            outRow = outRow - 1
+            GoTo SkipDate
+        End If
+        
+        Application.DisplayAlerts = False
+        dlg.Delete
+        Application.DisplayAlerts = True
+    End If
+
     ' === Step 5: Write blocks ===
     stage = "Write brigade blocks for date " & CStr(d)
     Dim b As Long
     For b = 1 To brigCount
+        If Not selBrig(b) Then GoTo SkipBrigade
+
         Dim curBrigKey As String
         curBrigKey = brigKeys(b)
 
-        ' Build worker names string from first order in this brigade
-        Dim brigWorkerIds As Variant
-        brigWorkerIds = Split(curBrigKey, ",")
-        Dim firstOrdKey As Variant
-        For Each firstOrdKey In dictBrigades(curBrigKey).Keys: Exit For: Next
         Dim wStr As String
-        wStr = ""
-        Dim wi As Long
-        For wi = 0 To UBound(brigWorkerIds)
-            If wi > 0 Then wStr = wStr & ", "
-            Dim wName As String: wName = ""
-            If dictOrderW(CStr(firstOrdKey)).Exists(CStr(brigWorkerIds(wi))) Then
-                wName = dictOrderW(CStr(firstOrdKey))(CStr(brigWorkerIds(wi)))
-            End If
-            wStr = wStr & wName & " (" & brigWorkerIds(wi) & ")"
-        Next wi
+        wStr = brigNames(b)
 
         ' Brigade header (merged B:N)
         stage = "Write brigade header " & CStr(d) & "." & CStr(b)
@@ -2232,42 +2410,47 @@ SkipDateRow:
         Next oi
 
         outRow = outRow + 1 ' empty row between brigades
+SkipBrigade:
     Next b
 
+SkipDate:
     Next d
 
     ' Apply formatting to used area
     Application.StatusBar = UW(1055, 1072, 1088, 1089, 1080, 1085, 1075, 32, 77, 82, 83, 58, 32, 1047, 1072, 1074, 1077, 1088, 1096, 1077, 1085, 1080, 1077, 32, 1092, 1086, 1088, 1084, 1072, 1090, 1080, 1088, 1086, 1074, 1072, 1085, 1080, 1103, 46, 46, 46)
     stage = "Finalize MRS formatting"
     Dim dataRange As Range
-    Set dataRange = wsMRS.Range(wsMRS.Cells(3, 2), wsMRS.Cells(outRow, 14))
-    dataRange.Font.Size = 14
-    dataRange.Font.Color = clrFont
-    dataRange.HorizontalAlignment = -4108
-    dataRange.VerticalAlignment = -4108
-
-    ' Restore header font sizes and alignment (overwritten by bulk formatting above)
     Dim rr As Long
     Dim cellVal As String
     Dim mergeColCount As Long
-    For rr = 3 To outRow
-        If wsMRS.Cells(rr, 2).MergeCells Then
-            mergeColCount = wsMRS.Cells(rr, 2).MergeArea.Columns.Count
-            cellVal = CStr(wsMRS.Cells(rr, 2).Value)
-            If mergeColCount >= 10 Then
-                If Left$(cellVal, 1) >= "0" And Left$(cellVal, 1) <= "9" Then
-                    ' Date header (e.g. "02.02.2026")
-                    wsMRS.Cells(rr, 2).Font.Size = 18
-                ElseIf Left$(cellVal, 1) = ChrW(1041) Then
-                    ' Brigade header (starts with "Б" from "Бригада:")
-                    wsMRS.Cells(rr, 2).Font.Size = 16
-                ElseIf Left$(cellVal, 1) = ChrW(1047) Then
-                    ' Order header (starts with "З" from "Заказ:")
-                    wsMRS.Cells(rr, 2).Font.Size = 15
+
+    If outRow >= 3 Then
+        Set dataRange = wsMRS.Range(wsMRS.Cells(3, 2), wsMRS.Cells(outRow, 14))
+        dataRange.Font.Size = 14
+        dataRange.Font.Color = clrFont
+        dataRange.HorizontalAlignment = -4108
+        dataRange.VerticalAlignment = -4108
+
+        ' Restore header font sizes and alignment (overwritten by bulk formatting above)
+        For rr = 3 To outRow
+            If wsMRS.Cells(rr, 2).MergeCells Then
+                mergeColCount = wsMRS.Cells(rr, 2).MergeArea.Columns.Count
+                cellVal = CStr(wsMRS.Cells(rr, 2).Value)
+                If mergeColCount >= 10 Then
+                    If Left$(cellVal, 1) >= "0" And Left$(cellVal, 1) <= "9" Then
+                        ' Date header (e.g. "02.02.2026")
+                        wsMRS.Cells(rr, 2).Font.Size = 18
+                    ElseIf Left$(cellVal, 1) = ChrW(1041) Then
+                        ' Brigade header (starts with "Б" from "Бригада:")
+                        wsMRS.Cells(rr, 2).Font.Size = 16
+                    ElseIf Left$(cellVal, 1) = ChrW(1047) Then
+                        ' Order header (starts with "З" from "Заказ:")
+                        wsMRS.Cells(rr, 2).Font.Size = 15
+                    End If
                 End If
             End If
-        End If
-    Next rr
+        Next rr
+    End If
 
     RefreshMRSSheetColors wsMRS, clrLocked, clrEditHasColor, clrEditable, clrMrsHeader, clrMrsSub, clrMrsOrder, clrFont
 
@@ -2461,6 +2644,34 @@ Private Sub ClearMRSArea(ByVal wsMRS As Worksheet, ByVal clrLocked As Long, ByVa
     rng.Locked = True
     rng.WrapText = False
     wsMRS.Rows("3:" & lastRow).RowHeight = wsMRS.StandardHeight
+End Sub
+
+Public Sub SelectAllBrigades()
+    On Error Resume Next
+    Dim dlg As Object
+    Set dlg = ActiveSheet
+    If TypeName(dlg) = "DialogSheet" Then
+        Dim lb As Object
+        Set lb = dlg.ListBoxes(1)
+        Dim i As Long
+        For i = 1 To lb.ListCount
+            lb.Selected(i) = True
+        Next i
+    End If
+End Sub
+
+Public Sub ClearAllBrigades()
+    On Error Resume Next
+    Dim dlg As Object
+    Set dlg = ActiveSheet
+    If TypeName(dlg) = "DialogSheet" Then
+        Dim lb As Object
+        Set lb = dlg.ListBoxes(1)
+        Dim i As Long
+        For i = 1 To lb.ListCount
+            lb.Selected(i) = False
+        Next i
+    End If
 End Sub
 
 Public Sub SaveHistorySheet()
