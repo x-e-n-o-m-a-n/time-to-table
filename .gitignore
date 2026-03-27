@@ -24,7 +24,7 @@ Thumbs.db
 TimeToTable_VBA.xlsm
 export.xlsx
 История_Расчетов_20-03-2026.xlsx
-
+tools/modTimeToTable_manual_commented.bas
 
 # Environment
 .env
