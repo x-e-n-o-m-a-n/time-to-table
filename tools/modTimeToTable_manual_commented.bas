@@ -1,100 +1,49 @@
-param(
-    [string]$OutputPath = (Join-Path (Split-Path $PSScriptRoot -Parent) "TimeToTable_VBA.xlsm")
-)
+' MIT License
+'
+' Copyright (c) 2026 Галимзянов Г.Р.
+'
+' Permission is hereby granted, free of charge, to any person obtaining a copy
+' of this software and associated documentation files (the "Software"), to deal
+' in the Software without restriction, including without limitation the rights
+' to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+' copies of the Software, and to permit persons to whom the Software is
+' furnished to do so, subject to the following conditions:
+'
+' The above copyright notice and this permission notice shall be included in all
+' copies or substantial portions of the Software.
+'
+' THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+' IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+' FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+' AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+' LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+' OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+' SOFTWARE.
+'
+' Автор исходного проекта: Галимзянов Г.Р.
+' Примечание: данный файл представляет собой документированную версию VBA-модуля.
 
-$ErrorActionPreference = "Stop"
-
-$OutputPath = [System.IO.Path]::GetFullPath($OutputPath)
-
-function RU([int[]]$codes) {
-    return -join ($codes | ForEach-Object { [char]$_ })
-}
-
-function Update-ZipEntryText {
-    param(
-        [Parameter(Mandatory = $true)]
-        $Archive,
-        [Parameter(Mandatory = $true)]
-        [string]$EntryName,
-        [Parameter(Mandatory = $true)]
-        [scriptblock]$Transform
-    )
-
-    $entry = $Archive.GetEntry($EntryName)
-    if ($null -eq $entry) {
-        return
-    }
-
-    $reader = New-Object System.IO.StreamReader($entry.Open())
-    try {
-        $content = $reader.ReadToEnd()
-    } finally {
-        $reader.Close()
-    }
-
-    $updated = & $Transform $content
-    if ($updated -ceq $content) {
-        return
-    }
-
-    $entry.Delete()
-    $newEntry = $Archive.CreateEntry($EntryName)
-    $writer = New-Object System.IO.StreamWriter($newEntry.Open())
-    try {
-        $writer.Write($updated)
-    } finally {
-        $writer.Close()
-    }
-}
-
-function Update-WorkbookFontsToArial {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$WorkbookPath
-    )
-
-    Add-Type -AssemblyName System.IO.Compression
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $archive = [System.IO.Compression.ZipFile]::Open($WorkbookPath, [System.IO.Compression.ZipArchiveMode]::Update)
-    try {
-        $replaceFonts = {
-            param([string]$xml)
-            $xml = $xml.Replace("Aptos Narrow", "Arial")
-            $xml = $xml.Replace("Aptos Display", "Arial")
-            $xml = $xml.Replace('<scheme val="minor"/>', '')
-            $xml = $xml.Replace('<scheme val="major"/>', '')
-            return $xml
-        }
-
-        Update-ZipEntryText -Archive $archive -EntryName "xl/styles.xml" -Transform $replaceFonts
-        Update-ZipEntryText -Archive $archive -EntryName "xl/theme/theme1.xml" -Transform $replaceFonts
-
-        $drawingEntries = @($archive.Entries | Where-Object { $_.FullName -like "xl/drawings/*.xml" })
-        foreach ($drawingEntry in $drawingEntries) {
-            Update-ZipEntryText -Archive $archive -EntryName $drawingEntry.FullName -Transform {
-                param([string]$xml)
-
-                $xml = [regex]::Replace(
-                    $xml,
-                    '<a:rPr\b([^>/]*)/>',
-                    '<a:rPr$1><a:latin typeface="Arial"/></a:rPr>'
-                )
-                $xml = [regex]::Replace(
-                    $xml,
-                    '<a:endParaRPr\b([^>/]*)/>',
-                    '<a:endParaRPr$1><a:latin typeface="Arial"/></a:endParaRPr>'
-                )
-                return $xml
-            }
-        }
-    } finally {
-        $archive.Dispose()
-    }
-}
-
-$vbaCode = @'
 Option Explicit
 
+' ===========================================================================
+' МОДУЛЬ modTimeToTable
+' ===========================================================================
+' Модуль объединяет несколько ключевых подсистем книги:
+'   - хранение и применение пользовательских цветовых настроек;
+'   - стилизацию и защиту рабочих листов;
+'   - нормализацию и валидацию пользовательского ввода;
+'   - расчёт цепочки операций с учётом исполнителей, пауз и обеда;
+'   - перенос результата на лист истории;
+'   - импорт внешних данных MRS и их группировку;
+'   - экспорт листов истории и MRS в отдельные xlsx-файлы.
+' ===========================================================================
+
+
+' ---------------------------------------------------------------------------
+' КОНСТАНТЫ: строки и колонки блока цветовых настроек
+' ---------------------------------------------------------------------------
+' В этой группе задаются координаты блока настроек цветов на листе ввода.
+' Эти значения используются при чтении, отображении и восстановлении цветов интерфейса.
 Private Const CLR_ROW_LOCKED As Long = 31
 Private Const CLR_ROW_EDITABLE As Long = 32
 Private Const CLR_ROW_MRS_HEADER As Long = 33
@@ -104,6 +53,12 @@ Private Const CLR_ROW_MRS_ORDER_UNCONF As Long = 36
 Private Const CLR_ROW_HEADER As Long = 37
 Private Const CLR_COL As Long = 2
 
+
+' ---------------------------------------------------------------------------
+' КОНСТАНТЫ: значения цветов по умолчанию
+' ---------------------------------------------------------------------------
+' Значения из этой группы применяются, когда пользователь ещё не задал
+' собственные цвета или когда соответствующие ячейки настроек пусты.
 Private Const CLR_DEF_LOCKED As Long = 15132415
 Private Const CLR_DEF_MRS_HEADER As Long = 15189684
 Private Const CLR_DEF_MRS_SUB As Long = 16768200
@@ -111,6 +66,22 @@ Private Const CLR_DEF_MRS_ORDER As Long = 13167560
 Private Const CLR_DEF_MRS_ORDER_UNCONF As Long = 14277081
 Private Const CLR_DEF_HEADER As Long = 13167560
 
+' ===========================================================================
+' ReadCellColor
+' ===========================================================================
+' Назначение:
+'   Считывает реальный цвет заливки из ячейки Excel.
+'   Если ячейка визуально не окрашена или Excel возвращает нулевое значение
+'   цвета, функция подставляет заранее заданный цвет по умолчанию.
+' Основные действия:
+'   - Проверяет наличие паттерна заливки.
+'   - Учитывает случай, когда цвет формально отсутствует.
+'   - Возвращает пригодное для дальнейшей стилизации значение Long.
+' Параметры:
+'   cell - ячейка, из которой считывается цвет.
+'   defaultColor - резервный цвет, используемый при отсутствии явной заливки.
+' Возвращаемое значение:
+'   Long-код цвета, который можно безопасно использовать в оформлении листов.
 Private Function ReadCellColor(ByVal cell As Range, ByVal defaultColor As Long) As Long
     If cell.Interior.Pattern = xlNone Or cell.Interior.Color = 0 Then
         ReadCellColor = defaultColor
@@ -119,20 +90,35 @@ Private Function ReadCellColor(ByVal cell As Range, ByVal defaultColor As Long) 
     End If
 End Function
 
+' ===========================================================================
+' GetContrastColor
+' ===========================================================================
+' Назначение:
+'   Подбирает цвет текста, который будет читаться на заданном фоне.
+'   Используется везде, где строки динамически перекрашиваются по статусу или
+'   пользовательским цветовым настройкам.
+' Основные действия:
+'   - Разбирает цвет Excel в формате Long на компоненты RGB.
+'   - Вычисляет условную яркость фона.
+'   - Возвращает чёрный или белый цвет в зависимости от яркости.
+' Параметры:
+'   bgColor - цвет фона, для которого выбирается контрастный шрифт.
+' Возвращаемое значение:
+'   Long-код цвета шрифта: обычно чёрный для светлого фона и белый для тёмного.
 Public Function GetContrastColor(ByVal bgColor As Long) As Long
     If bgColor = xlNone Or bgColor = -4142 Then
         GetContrastColor = 0
         Exit Function
     End If
     
-    Dim R As Long, G As Long, B As Long
+    Dim r As Long, G As Long, b As Long
     Dim luminance As Double
     
-    R = bgColor Mod 256
+    r = bgColor Mod 256
     G = (bgColor \ 256) Mod 256
-    B = (bgColor \ 65536) Mod 256
+    b = (bgColor \ 65536) Mod 256
     
-    luminance = (R * 299& + G * 587& + B * 114&) / 1000#
+    luminance = (r * 299& + G * 587& + b * 114&) / 1000#
     
     If luminance > 128 Then
         GetContrastColor = 0
@@ -141,6 +127,31 @@ Public Function GetContrastColor(ByVal bgColor As Long) As Long
     End If
 End Function
 
+' ===========================================================================
+' ReadAllColors
+' ===========================================================================
+' Назначение:
+'   Читает полный набор активных цветовых настроек с листа "Ввод".
+'   Это центральная точка получения палитры, которой затем пользуются все
+'   процедуры перекраски интерфейса и строк данных.
+' Основные действия:
+'   - Считывает цвет заблокированных ячеек.
+'   - Определяет, задан ли отдельный цвет для редактируемых ячеек.
+'   - Получает цвета заголовков MRS, подтверждённых и неподтверждённых заказов,
+'     а также цвет шапок и служебных областей.
+'   - Возвращает результаты через параметры ByRef.
+' Параметры:
+'   wsIn - лист "Ввод", где расположен блок настройки цветов.
+'   clrLocked - сюда возвращается цвет заблокированных ячеек.
+'   clrEditHasColor - флаг, указывающий, задан ли отдельный цвет редактируемых ячеек.
+'   clrEditable - сюда возвращается цвет редактируемых ячеек.
+'   clrMrsHeader - сюда возвращается цвет заголовков дат MRS.
+'   clrMrsSub - сюда возвращается цвет строк бригад MRS.
+'   clrMrsOrder - сюда возвращается цвет подтверждённых заказов.
+'   clrMrsOrderUnconf - сюда возвращается цвет неподтверждённых заказов.
+'   clrHeader - сюда возвращается цвет шапок и выделенных служебных областей.
+' Эффект выполнения:
+'   Процедура не меняет лист напрямую, а заполняет набор переменных для других сценариев.
 Private Sub ReadAllColors(ByVal wsIn As Worksheet, _
     ByRef clrLocked As Long, _
     ByRef clrEditHasColor As Boolean, ByRef clrEditable As Long, _
@@ -165,6 +176,27 @@ Private Sub ReadAllColors(ByVal wsIn As Worksheet, _
     clrHeader = ReadCellColor(wsIn.Cells(CLR_ROW_HEADER, CLR_COL), CLR_DEF_HEADER)
 End Sub
 
+' ===========================================================================
+' GetOrderColors
+' ===========================================================================
+' Назначение:
+'   Быстро возвращает цвета, связанные со строками заказов.
+'   Процедура нужна в обработчиках изменений листов и при экспорте, где нет
+'   необходимости заново читать весь набор пользовательской палитры.
+' Основные действия:
+'   - Берёт лист "Ввод" как источник настроек.
+'   - Читает цвет подтверждённых заказов.
+'   - Читает цвет неподтверждённых заказов.
+'   - При необходимости дополнительно возвращает цвет блокировки и состояние
+'     оформления редактируемых ячеек.
+' Параметры:
+'   clrMrsOrder - сюда возвращается цвет подтверждённых заказов.
+'   clrMrsOrderUnconf - сюда возвращается цвет неподтверждённых заказов.
+'   clrLocked - необязательный выходной параметр для цвета блокировки.
+'   clrEditHasColor - необязательный флаг наличия цвета редактируемых ячеек.
+'   clrEditable - необязательный выходной параметр для цвета редактируемых ячеек.
+' Эффект выполнения:
+'   Процедура читает настройки из книги и возвращает их вызывающему коду.
 Public Sub GetOrderColors(ByRef clrMrsOrder As Long, ByRef clrMrsOrderUnconf As Long, Optional ByRef clrLocked As Long, Optional ByRef clrEditHasColor As Boolean, Optional ByRef clrEditable As Long)
     Dim wsIn As Worksheet
     Set wsIn = ThisWorkbook.Worksheets(2)
@@ -180,6 +212,26 @@ Public Sub GetOrderColors(ByRef clrMrsOrder As Long, ByRef clrMrsOrderUnconf As 
     End If
 End Sub
 
+' ===========================================================================
+' ColorOrderRow
+' ===========================================================================
+' Назначение:
+'   Применяет цветовое оформление к целой строке заказа по значению статуса в колонке B.
+'   Используется как на листе истории, так и на листе MRS.
+' Основные действия:
+'   - Берёт диапазон строки от колонки B до последней рабочей колонки.
+'   - Считывает текст статуса в колонке B.
+'   - Если заказ подтверждён, применяет основной цвет заказа.
+'   - Если заказ не подтверждён, применяет альтернативный цвет.
+'   - Для текста автоматически подбирает контрастный цвет шрифта.
+' Параметры:
+'   ws - лист, на котором находится строка заказа.
+'   r - номер окрашиваемой строки.
+'   lastCol - последняя колонка строки, входящая в цветовой диапазон.
+'   clrOrder - цвет подтверждённого заказа.
+'   clrUnconf - цвет неподтверждённого заказа.
+' Эффект выполнения:
+'   Процедура меняет заливку и цвет шрифта в строке заказа.
 Public Sub ColorOrderRow(ByVal ws As Worksheet, ByVal r As Long, ByVal lastCol As Long, _
     ByVal clrOrder As Long, ByVal clrUnconf As Long)
     Dim rng As Range
@@ -195,6 +247,22 @@ Public Sub ColorOrderRow(ByVal ws As Worksheet, ByVal r As Long, ByVal lastCol A
     End If
 End Sub
 
+' ===========================================================================
+' EnsureColorSettings
+' ===========================================================================
+' Назначение:
+'   Восстанавливает и поддерживает служебный блок настройки цветов на листе "Ввод".
+'   Без этого блока пользователь не сможет менять палитру, а процедуры перекраски
+'   книги не получат корректный источник настроек.
+' Основные действия:
+'   - Создаёт заголовок блока и подписи строк настроек.
+'   - Делает текстовые метки защищёнными, а ячейки выбора цвета редактируемыми.
+'   - Заполняет пустые цветовые настройки цветами по умолчанию.
+'   - Временно отключает события, чтобы не вызвать рекурсивные обработчики.
+' Параметры:
+'   wsIn - лист "Ввод", на котором хранится блок цветовых настроек.
+' Эффект выполнения:
+'   Процедура модифицирует разметку, защиту и цветовые образцы на листе ввода.
 Private Sub EnsureColorSettings(ByVal wsIn As Worksheet)
     Dim r As Long
     Dim prevEvents As Boolean
@@ -207,6 +275,8 @@ Private Sub EnsureColorSettings(ByVal wsIn As Worksheet)
     On Error GoTo EH
 
     wsIn.Cells(29, 1).Value = UW(1053, 1072, 1089, 1090, 1088, 1086, 1081, 1082, 1080, 32, 1062, 1074, 1077, 1090, 1086, 1074)
+    ' Объединение заголовка может уже существовать, поэтому merge выполняется
+    ' через отдельный quiet-helper без переключения внешнего обработчика ошибок.
     MergeRangeQuiet wsIn.Range("A29:B29")
     wsIn.Cells(29, 1).Font.Bold = True
 
@@ -258,11 +328,42 @@ Cleanup:
     End If
 End Sub
 
+' ===========================================================================
+' ApplyLockedStyle
+' ===========================================================================
+' Назначение:
+'   Применяет к диапазону стиль "заблокированная область".
+'   Такой стиль используется для ячеек, которые пользователь не должен менять напрямую.
+' Основные действия:
+'   - Задаёт диапазону цвет фона заблокированной области.
+'   - Подбирает для него контрастный цвет текста.
+' Параметры:
+'   rng - диапазон, который нужно оформить.
+'   clrLocked - цвет заливки для заблокированного состояния.
+' Эффект выполнения:
+'   Процедура меняет визуальное оформление переданного диапазона.
 Private Sub ApplyLockedStyle(ByVal rng As Range, ByVal clrLocked As Long)
     rng.Interior.Color = clrLocked
     rng.Font.Color = GetContrastColor(clrLocked)
 End Sub
 
+' ===========================================================================
+' ApplyEditableStyle
+' ===========================================================================
+' Назначение:
+'   Применяет к диапазону стиль редактируемой области.
+'   Поддерживает два режима: явная заливка для редактируемых ячеек и прозрачный
+'   режим, когда пользователь оставил редактируемые ячейки без фона.
+' Основные действия:
+'   - Если пользовательский цвет задан, применяет его.
+'   - Если цвет не задан, убирает заливку.
+'   - Настраивает цвет шрифта под выбранное состояние.
+' Параметры:
+'   rng - диапазон, который нужно оформить как редактируемый.
+'   clrEditHasColor - флаг, показывающий, задан ли цвет редактируемых ячеек.
+'   clrEditable - цвет редактируемых ячеек.
+' Эффект выполнения:
+'   Процедура меняет заливку и цвет текста переданного диапазона.
 Private Sub ApplyEditableStyle(ByVal rng As Range, ByVal clrEditHasColor As Boolean, ByVal clrEditable As Long)
     If clrEditHasColor Then
         rng.Interior.Color = clrEditable
@@ -273,6 +374,21 @@ Private Sub ApplyEditableStyle(ByVal rng As Range, ByVal clrEditHasColor As Bool
     End If
 End Sub
 
+' ===========================================================================
+' BuildColorSettingsSignature
+' ===========================================================================
+' Назначение:
+'   Строит компактную строковую сигнатуру блока цветовых настроек.
+'   Такая сигнатура удобна для сравнения: если строка изменилась, значит пользователь
+'   поменял один из цветов или состояние соответствующей ячейки.
+' Основные действия:
+'   - Проходит по строкам служебного блока настроек цветов.
+'   - Для каждой строки фиксирует паттерн заливки и сам цвет.
+'   - Собирает результаты в одну строку с разделителями.
+' Параметры:
+'   wsIn - лист "Ввод", содержащий блок цветовых настроек.
+' Возвращаемое значение:
+'   Строка-сигнатура, описывающая текущее состояние цветового блока.
 Public Function BuildColorSettingsSignature(ByVal wsIn As Worksheet) As String
     Dim r As Long
     Dim cell As Range
@@ -285,6 +401,20 @@ Public Function BuildColorSettingsSignature(ByVal wsIn As Worksheet) As String
     Next r
 End Function
 
+' ===========================================================================
+' LastContentRow
+' ===========================================================================
+' Назначение:
+'   Находит нижнюю границу данных на листе.
+'   Это базовый helper для построения динамических диапазонов без жёстко заданной длины.
+' Основные действия:
+'   - Ищет последнюю непустую ячейку методом `Find`.
+'   - Если данных нет, возвращает безопасное минимальное значение.
+' Параметры:
+'   ws - лист, на котором ищется последняя заполненная строка.
+'   minRow - минимально допустимое значение результата.
+' Возвращаемое значение:
+'   Номер последней содержательной строки, но не меньше `minRow`.
 Private Function LastContentRow(ByVal ws As Worksheet, Optional ByVal minRow As Long = 1) As Long
     Dim lastCell As Range
 
@@ -301,6 +431,21 @@ Private Function LastContentRow(ByVal ws As Worksheet, Optional ByVal minRow As 
     End If
 End Function
 
+' ===========================================================================
+' ApplyHistoryOperationSeparators
+' ===========================================================================
+' Назначение:
+'   Ставит визуальные разделители между операциями на листе истории.
+'   Это упрощает чтение больших блоков истории, где подряд могут идти строки
+'   нескольких операций и нескольких исполнителей.
+' Основные действия:
+'   - Сначала назначает всем строкам стандартную нижнюю границу.
+'   - Затем ищет места, где номер операции меняется.
+'   - На границе смены операции ставит утолщённую линию.
+' Параметры:
+'   wsHist - лист истории.
+' Эффект выполнения:
+'   На листе истории появляются визуальные разделители между соседними операциями.
 Private Sub ApplyHistoryOperationSeparators(ByVal wsHist As Worksheet)
     Dim lastRow As Long, r As Long
     Dim currOp As String, nextOp As String
@@ -329,6 +474,21 @@ Private Sub ApplyHistoryOperationSeparators(ByVal wsHist As Worksheet)
     Next r
 End Sub
 
+' ===========================================================================
+' IsMRSDataRow
+' ===========================================================================
+' Назначение:
+'   Определяет, является ли строка листа MRS строкой данных, а не заголовком.
+'   Нужна для корректной перекраски и постановки разделителей только на строках операций.
+' Основные действия:
+'   - Отбрасывает строки шапки.
+'   - Исключает объединённые заголовочные строки.
+'   - Проверяет наличие числового номера и названия операции.
+' Параметры:
+'   wsMRS - лист MRS.
+'   rowNum - номер проверяемой строки.
+' Возвращаемое значение:
+'   True, если строка содержит данные операции MRS; иначе False.
 Private Function IsMRSDataRow(ByVal wsMRS As Worksheet, ByVal rowNum As Long) As Boolean
     If rowNum < 4 Then Exit Function
     If wsMRS.Cells(rowNum, 2).MergeCells Then Exit Function
@@ -337,6 +497,20 @@ Private Function IsMRSDataRow(ByVal wsMRS As Worksheet, ByVal rowNum As Long) As
     IsMRSDataRow = True
 End Function
 
+' ===========================================================================
+' ApplyMRSOperationSeparators
+' ===========================================================================
+' Назначение:
+'   Ставит визуальные разделители между разными операциями на листе MRS.
+'   Аналогична процедуре для истории, но работает по структуре и ширине листа MRS.
+' Основные действия:
+'   - Назначает всем строкам данных обычную нижнюю границу.
+'   - Сравнивает название текущей и следующей операции.
+'   - При смене операции делает границу утолщённой.
+' Параметры:
+'   wsMRS - лист парсинга MRS.
+' Эффект выполнения:
+'   Группы операций на листе MRS становятся визуально отделёнными.
 Private Sub ApplyMRSOperationSeparators(ByVal wsMRS As Worksheet)
     Dim lastRow As Long, r As Long
     Dim currOp As String, nextOp As String
@@ -365,6 +539,26 @@ Private Sub ApplyMRSOperationSeparators(ByVal wsMRS As Worksheet)
     Next r
 End Sub
 
+' ===========================================================================
+' SyncPauseInputCell
+' ===========================================================================
+' Назначение:
+'   Синхронизирует доступность ячейки паузы перед первой операцией.
+'   Пока история пуста, такая пауза не имеет смысла, поэтому поле должно быть
+'   недоступным; после появления истории поле становится редактируемым.
+' Основные действия:
+'   - Проверяет, есть ли на листе истории строки данных.
+'   - Если истории нет, блокирует ячейку паузы и оформляет её как служебную.
+'   - Если история есть, делает ячейку редактируемой.
+'   - В любом случае восстанавливает границу ячейки.
+' Параметры:
+'   wsIn - лист ввода.
+'   wsHist - лист истории.
+'   clrLocked - цвет заблокированного состояния.
+'   clrEditHasColor - признак пользовательского цвета редактируемых ячеек.
+'   clrEditable - цвет редактируемой ячейки.
+' Эффект выполнения:
+'   Поле паузы на листе ввода всегда соответствует текущему состоянию истории.
 Private Sub SyncPauseInputCell(ByVal wsIn As Worksheet, ByVal wsHist As Worksheet, _
     ByVal clrLocked As Long, _
     ByVal clrEditHasColor As Boolean, ByVal clrEditable As Long)
@@ -382,6 +576,32 @@ Private Sub SyncPauseInputCell(ByVal wsIn As Worksheet, ByVal wsHist As Workshee
     wsIn.Cells(4, 14).Borders.LineStyle = xlContinuous
 End Sub
 
+' ===========================================================================
+' RefreshInputSheetColors
+' ===========================================================================
+' Назначение:
+'   Полностью обновляет цветовую схему листа "Ввод".
+'   Это наиболее насыщенный по структуре лист книги, поэтому для него отдельная
+'   процедура перекраски нужна и для базовых полей, и для динамических блоков.
+' Основные действия:
+'   - Применяет общий фон заблокированного состояния ко всему листу.
+'   - Выделяет все редактируемые области.
+'   - Восстанавливает образцы цветовых настроек в служебном блоке.
+'   - Синхронизирует количество строк работников и операций.
+'   - Обновляет состояние ячейки паузы перед первой операцией.
+' Параметры:
+'   wsIn - лист ввода.
+'   wsHist - лист истории.
+'   clrLocked - базовый цвет заблокированных областей.
+'   clrEditHasColor - признак пользовательского цвета редактируемых ячеек.
+'   clrEditable - цвет редактируемых ячеек.
+'   clrMrsHeader - цвет заголовков дат MRS.
+'   clrMrsSub - цвет строк бригад MRS.
+'   clrMrsOrder - цвет подтверждённых заказов.
+'   clrMrsOrderUnconf - цвет неподтверждённых заказов.
+'   clrHeader - цвет шапок и служебных областей.
+' Эффект выполнения:
+'   Лист ввода полностью приводится к актуальной палитре и корректной структуре интерфейса.
 Private Sub RefreshInputSheetColors(ByVal wsIn As Worksheet, ByVal wsHist As Worksheet, _
     ByVal clrLocked As Long, _
     ByVal clrEditHasColor As Boolean, ByVal clrEditable As Long, _
@@ -423,12 +643,12 @@ Private Sub RefreshInputSheetColors(ByVal wsIn As Worksheet, ByVal wsHist As Wor
     wsIn.Cells(CLR_ROW_HEADER, CLR_COL).Interior.Color = clrHeader
     wsIn.Cells(CLR_ROW_HEADER, CLR_COL).Font.Color = GetContrastColor(clrHeader)
 
-    workerCount = CLng(Val(wsIn.Range("B9").Value))
+    workerCount = CLng(val(wsIn.Range("B9").Value))
     If workerCount < 1 Then workerCount = 1
     If workerCount > 10 Then workerCount = 10
     SyncWorkerIdInputs wsIn, workerCount
 
-    opCount = CLng(Val(wsIn.Range("B8").Value))
+    opCount = CLng(val(wsIn.Range("B8").Value))
     If opCount < 1 Then opCount = 1
     If opCount > 20 Then opCount = 20
     SyncOperationRows wsIn, opCount
@@ -436,16 +656,63 @@ Private Sub RefreshInputSheetColors(ByVal wsIn As Worksheet, ByVal wsHist As Wor
     SyncPauseInputCell wsIn, wsHist, clrLocked, clrEditHasColor, clrEditable
 End Sub
 
+' ===========================================================================
+' RefreshResultSheetColors
+' ===========================================================================
+' Назначение:
+'   Обновляет базовое оформление листа результата.
+'   Лист результата почти целиком служебный, поэтому его перекраска сводится
+'   к единому фону и контрастному цвету текста.
+' Параметры:
+'   wsOut - лист результата.
+'   clrLocked - базовый цвет служебного состояния.
+' Эффект выполнения:
+'   Лист результата получает единый фон и согласованный цвет шрифта.
 Private Sub RefreshResultSheetColors(ByVal wsOut As Worksheet, ByVal clrLocked As Long)
     wsOut.Cells.Interior.Color = clrLocked
     wsOut.Cells.Font.Color = GetContrastColor(clrLocked)
 End Sub
 
+' ===========================================================================
+' RefreshDisclaimerSheetColors
+' ===========================================================================
+' Назначение:
+'   Обновляет цветовую схему служебного листа дисклеймера.
+'   Лист не содержит сложной интерактивной структуры, поэтому для него достаточно
+'   единого фона и контрастного текста.
+' Параметры:
+'   wsDisclaimer - лист дисклеймера.
+'   clrLocked - базовый цвет служебного фона.
+' Эффект выполнения:
+'   Лист дисклеймера приводится к общей палитре книги.
 Private Sub RefreshDisclaimerSheetColors(ByVal wsDisclaimer As Worksheet, ByVal clrLocked As Long)
     wsDisclaimer.Cells.Interior.Color = clrLocked
     wsDisclaimer.Cells.Font.Color = GetContrastColor(clrLocked)
 End Sub
 
+' ===========================================================================
+' RefreshHistorySheetColors
+' ===========================================================================
+' Назначение:
+'   Полностью перекрашивает лист истории.
+'   Процедура должна учесть и служебные шапки, и строки заказов по статусу,
+'   и отдельные редактируемые колонки внутри блока истории.
+' Основные действия:
+'   - Заливает весь лист базовым фоном.
+'   - Перекрашивает верхнюю шапку и служебные строки.
+'   - Разносит строки на подтверждённые и неподтверждённые заказы.
+'   - Возвращает стиль редактируемым колонкам.
+'   - Ставит визуальные разделители операций.
+' Параметры:
+'   wsHist - лист истории.
+'   clrLocked - цвет базового фона.
+'   clrEditHasColor - признак пользовательского цвета редактируемых ячеек.
+'   clrEditable - цвет редактируемых ячеек.
+'   clrMrsOrder - цвет подтверждённых заказов.
+'   clrMrsOrderUnconf - цвет неподтверждённых заказов.
+'   clrHeader - цвет верхних шапок и служебных зон.
+' Эффект выполнения:
+'   История получает актуальную палитру и остаётся читаемой даже после массовых изменений.
 Private Sub RefreshHistorySheetColors(ByVal wsHist As Worksheet, ByVal clrLocked As Long, _
     ByVal clrEditHasColor As Boolean, ByVal clrEditable As Long, ByVal clrMrsOrder As Long, ByVal clrMrsOrderUnconf As Long, ByVal clrHeader As Long)
 
@@ -493,6 +760,31 @@ Private Sub RefreshHistorySheetColors(ByVal wsHist As Worksheet, ByVal clrLocked
     ApplyHistoryOperationSeparators wsHist
 End Sub
 
+' ===========================================================================
+' RefreshMRSSheetColors
+' ===========================================================================
+' Назначение:
+'   Полностью перекрашивает лист "Парсинг MRS".
+'   Лист содержит несколько типов строк: шапки, заголовки дат, заголовки бригад
+'   и собственно строки заказов, поэтому оформление разбирается по типам.
+' Основные действия:
+'   - Применяет базовый фон ко всему листу.
+'   - Отдельно перекрашивает верхние строки-шапки.
+'   - Собирает диапазоны строк разных типов и красит их по своей палитре.
+'   - Возвращает стиль редактируемым колонкам.
+'   - Восстанавливает визуальные разделители операций.
+' Параметры:
+'   wsMRS - лист парсинга MRS.
+'   clrLocked - цвет базового фона.
+'   clrEditHasColor - признак пользовательского цвета редактируемых ячеек.
+'   clrEditable - цвет редактируемых ячеек.
+'   clrMrsHeader - цвет заголовков дат.
+'   clrMrsSub - цвет строк бригад.
+'   clrMrsOrder - цвет подтверждённых заказов.
+'   clrMrsOrderUnconf - цвет неподтверждённых заказов.
+'   clrHeader - цвет верхней шапки листа.
+' Эффект выполнения:
+'   Лист MRS приводится к согласованному виду после импорта, очистки или смены палитры.
 Private Sub RefreshMRSSheetColors(ByVal wsMRS As Worksheet, ByVal clrLocked As Long, _
     ByVal clrEditHasColor As Boolean, ByVal clrEditable As Long, _
     ByVal clrMrsHeader As Long, ByVal clrMrsSub As Long, _
@@ -555,6 +847,26 @@ Private Sub RefreshMRSSheetColors(ByVal wsMRS As Worksheet, ByVal clrLocked As L
     ApplyMRSOperationSeparators wsMRS
 End Sub
 
+' ===========================================================================
+' RefreshNotesSheetColors
+' ===========================================================================
+' Назначение:
+'   Обновляет цветовую схему листа заметок.
+'   Лист заметок имеет собственную компактную структуру, поэтому для него используется
+'   отдельная процедура перекраски, а не общая логика рабочих листов.
+' Основные действия:
+'   - Заливает весь лист базовым цветом заблокированного состояния.
+'   - Отдельно оформляет шапки таблиц заметок.
+'   - Делает редактируемые колонки заметок визуально отличимыми.
+'   - Восстанавливает границы таблиц.
+' Параметры:
+'   wsNotes - лист заметок.
+'   clrLocked - базовый цвет заблокированных областей.
+'   clrEditHasColor - флаг наличия цвета для редактируемых ячеек.
+'   clrEditable - цвет редактируемых полей.
+'   clrHeader - цвет заголовков таблиц заметок.
+' Эффект выполнения:
+'   Лист заметок приводится к актуальной цветовой схеме книги.
 Private Sub RefreshNotesSheetColors(ByVal wsNotes As Worksheet, ByVal clrLocked As Long, _
     ByVal clrEditHasColor As Boolean, ByVal clrEditable As Long, ByVal clrHeader As Long)
 
@@ -574,11 +886,28 @@ Private Sub RefreshNotesSheetColors(ByVal wsNotes As Worksheet, ByVal clrLocked 
     wsNotes.Range("F2:F52").Borders.LineStyle = xlContinuous
 End Sub
 
-Private Sub SetRangeBoldSafe(ByVal target As Range, ByVal isBold As Boolean, Optional ByVal tag As String = "")
+' ===========================================================================
+' SetRangeBoldSafe
+' ===========================================================================
+' Назначение:
+'   Безопасно устанавливает или снимает жирное начертание для диапазона.
+'   В отличие от прямого `Range.Font.Bold = ...`, процедура аккуратно обходит
+'   объединённые ячейки и поднимает более информативную ошибку при сбое.
+' Основные действия:
+'   - Проходит по всем ячейкам диапазона.
+'   - Для объединённых областей меняет стиль только у первой ячейки MergeArea.
+'   - При ошибке возвращает расширенное описание с именем этапа и адресом ячейки.
+' Параметры:
+'   Target - диапазон, где нужно изменить жирность текста.
+'   isBold - признак, нужно ли включить жирное начертание.
+'   tag - служебная текстовая метка для диагностики.
+' Эффект выполнения:
+'   Процедура меняет форматирование текста в диапазоне и упрощает поиск ошибок форматирования.
+Private Sub SetRangeBoldSafe(ByVal Target As Range, ByVal isBold As Boolean, Optional ByVal tag As String = "")
     Dim cell As Range
 
     On Error GoTo EH
-    For Each cell In target.Cells
+    For Each cell In Target.Cells
         If cell.MergeCells Then
             If cell.Address = cell.MergeArea.Cells(1, 1).Address Then
                 cell.Font.Bold = isBold
@@ -593,23 +922,66 @@ EH:
     Err.Raise Err.Number, "SetRangeBoldSafe", "Bold stage '" & tag & "' at " & cell.Address(False, False) & ": " & Err.Description
 End Sub
 
-Private Sub SetCellBoldSafe(ByVal target As Range, ByVal isBold As Boolean, Optional ByVal tag As String = "")
+' ===========================================================================
+' SetCellBoldSafe
+' ===========================================================================
+' Назначение:
+'   Безопасно управляет жирным начертанием одной ячейки.
+'   Это локальная версия `SetRangeBoldSafe`, удобная для точечной разметки шапок и заголовков.
+' Основные действия:
+'   - Проверяет, входит ли ячейка в объединённую область.
+'   - Применяет изменение к корректной целевой ячейке.
+'   - При ошибке возвращает диагностическое сообщение с адресом.
+' Параметры:
+'   Target - ячейка, стиль которой нужно изменить.
+'   isBold - признак, нужно ли сделать текст жирным.
+'   tag - служебная метка этапа форматирования.
+' Эффект выполнения:
+'   Процедура меняет формат шрифта одной ячейки или её объединённой области.
+Private Sub SetCellBoldSafe(ByVal Target As Range, ByVal isBold As Boolean, Optional ByVal tag As String = "")
     On Error GoTo EH
-    If target.MergeCells Then
-        target.MergeArea.Cells(1, 1).Font.Bold = isBold
+    If Target.MergeCells Then
+        Target.MergeArea.Cells(1, 1).Font.Bold = isBold
     Else
-        target.Font.Bold = isBold
+        Target.Font.Bold = isBold
     End If
     Exit Sub
 
 EH:
-    Err.Raise Err.Number, "SetCellBoldSafe", "Bold stage '" & tag & "' at " & target.Address(False, False) & ": " & Err.Description
+    Err.Raise Err.Number, "SetCellBoldSafe", "Bold stage '" & tag & "' at " & Target.Address(False, False) & ": " & Err.Description
 End Sub
 
+' ===========================================================================
+' BuildValidationDateFormula
+' ===========================================================================
+' Назначение:
+'   Преобразует дату в строку, пригодную для передачи в правило валидации Excel.
+'   Excel ожидает серийный номер даты, а не форматированную строку.
+' Основные действия:
+'   - Берёт только целую серийную часть даты.
+'   - Возвращает её в текстовом виде для дальнейшей подстановки в Validation.
+' Параметры:
+'   d - дата, которую нужно подготовить для правила проверки.
+' Возвращаемое значение:
+'   Строковое представление серийного номера даты Excel.
 Private Function BuildValidationDateFormula(ByVal d As Date) As String
     BuildValidationDateFormula = CStr(CLng(d))
 End Function
 
+' ===========================================================================
+' BuildValidationDecimalFormula
+' ===========================================================================
+' Назначение:
+'   Готовит числовую границу для текстовой формулы валидации.
+'   Учитывает локальный десятичный разделитель Excel, чтобы формулы работали
+'   независимо от региональных настроек системы.
+' Основные действия:
+'   - Получает локальный десятичный разделитель приложения Excel.
+'   - Нормализует текст числа под этот разделитель.
+' Параметры:
+'   valueNum - число, которое нужно вставить в формулу проверки.
+' Возвращаемое значение:
+'   Строка с числом в локально совместимом виде.
 Private Function BuildValidationDecimalFormula(ByVal valueNum As Double) As String
     Dim decSep As String
     Dim txt As String
@@ -621,8 +993,24 @@ Private Function BuildValidationDecimalFormula(ByVal valueNum As Double) As Stri
     BuildValidationDecimalFormula = txt
 End Function
 
-Private Sub ApplyDateValidation(ByVal target As Range, ByVal minDate As Date, ByVal maxDate As Date)
-    With target.Validation
+' ===========================================================================
+' ApplyDateValidation
+' ===========================================================================
+' Назначение:
+'   Назначает правилу ввода ячейки ограничение по диапазону дат.
+'   Используется там, где дата может редактироваться пользователем вручную.
+' Основные действия:
+'   - Удаляет предыдущее правило Validation.
+'   - Создаёт новое правило типа `xlValidateDate`.
+'   - Ограничивает допустимый диапазон между minDate и maxDate.
+' Параметры:
+'   Target - ячейка или диапазон, для которого назначается правило.
+'   minDate - минимально допустимая дата.
+'   maxDate - максимально допустимая дата.
+' Эффект выполнения:
+'   Excel начинает блокировать ввод дат за пределами допустимого интервала.
+Private Sub ApplyDateValidation(ByVal Target As Range, ByVal minDate As Date, ByVal maxDate As Date)
+    With Target.Validation
         .Delete
         .Add Type:=xlValidateDate, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, _
             Formula1:=CLng(minDate), Formula2:=CLng(maxDate)
@@ -630,8 +1018,21 @@ Private Sub ApplyDateValidation(ByVal target As Range, ByVal minDate As Date, By
     End With
 End Sub
 
-Private Sub ApplyTimeValidation(ByVal target As Range)
-    With target.Validation
+' ===========================================================================
+' ApplyTimeValidation
+' ===========================================================================
+' Назначение:
+'   Ограничивает ввод диапазоном корректного времени суток.
+'   Используется в ячейках, где пользователь может вручную редактировать время.
+' Основные действия:
+'   - Удаляет текущее правило Validation.
+'   - Создаёт правило `xlValidateTime` для диапазона от 00:00:00 до 23:59:59.
+' Параметры:
+'   Target - ячейка или диапазон, куда разрешён ввод времени.
+' Эффект выполнения:
+'   Пользователь не сможет ввести значение вне стандартного суточного времени.
+Private Sub ApplyTimeValidation(ByVal Target As Range)
+    With Target.Validation
         .Delete
         .Add Type:=xlValidateTime, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, _
             Formula1:=0, Formula2:=86399# / 86400#
@@ -639,8 +1040,23 @@ Private Sub ApplyTimeValidation(ByVal target As Range)
     End With
 End Sub
 
-Private Sub ApplyDecimalValidation(ByVal target As Range, ByVal minVal As Double, ByVal maxVal As Double)
-    With target.Validation
+' ===========================================================================
+' ApplyDecimalValidation
+' ===========================================================================
+' Назначение:
+'   Назначает стандартную числовую валидацию для десятичного значения.
+'   Подходит для ячеек, где Excel хранит именно число, а не текстовую форму числа.
+' Основные действия:
+'   - Удаляет прежнее правило проверки.
+'   - Назначает правило `xlValidateDecimal` с диапазоном minVal..maxVal.
+' Параметры:
+'   Target - ячейка или диапазон, для которого включается проверка.
+'   minVal - минимально допустимое значение.
+'   maxVal - максимально допустимое значение.
+' Эффект выполнения:
+'   Excel ограничивает ввод десятичных чисел заданным интервалом.
+Private Sub ApplyDecimalValidation(ByVal Target As Range, ByVal minVal As Double, ByVal maxVal As Double)
+    With Target.Validation
         .Delete
         .Add Type:=xlValidateDecimal, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, _
             Formula1:=minVal, Formula2:=maxVal
@@ -648,20 +1064,38 @@ Private Sub ApplyDecimalValidation(ByVal target As Range, ByVal minVal As Double
     End With
 End Sub
 
-Private Sub ApplyDecimalTextValidation(ByVal target As Range, ByVal minVal As Double, ByVal maxVal As Double)
+' ===========================================================================
+' ApplyDecimalTextValidation
+' ===========================================================================
+' Назначение:
+'   Назначает валидацию для ячейки, где десятичное число вводится как текст.
+'   Такой подход нужен, когда важно сохранить пользовательский контроль над форматом
+'   ввода, но при этом не допустить мусорных значений.
+' Основные действия:
+'   - Строит адрес ячейки для формулы Validation.
+'   - Готовит локально совместимые текстовые границы диапазона.
+'   - Создаёт пользовательскую формулу, которая допускает пустую ячейку
+'     либо корректное десятичное число в заданных пределах.
+' Параметры:
+'   Target - ячейка или диапазон с текстовым представлением числа.
+'   minVal - нижняя допустимая граница.
+'   maxVal - верхняя допустимая граница.
+' Эффект выполнения:
+'   Excel проверяет текстовый ввод как десятичное число без жёсткого перевода ячейки в numeric-only режим.
+Private Sub ApplyDecimalTextValidation(ByVal Target As Range, ByVal minVal As Double, ByVal maxVal As Double)
     Dim addr As String
     Dim q As String
     Dim minTxt As String
     Dim maxTxt As String
     Dim valueExpr As String
 
-    addr = target.Cells(1, 1).Address(False, False)
+    addr = Target.Cells(1, 1).Address(False, False)
     q = Chr$(34)
     minTxt = BuildValidationDecimalFormula(minVal)
     maxTxt = BuildValidationDecimalFormula(maxVal)
     valueExpr = "VALUE(SUBSTITUTE(" & addr & "," & q & "." & q & "," & q & "," & q & "))"
 
-    With target.Validation
+    With Target.Validation
         .Delete
         .Add Type:=xlValidateCustom, AlertStyle:=xlValidAlertStop, _
             Formula1:="=OR(LEN(TRIM(" & addr & "))=0,AND(ISNUMBER(IFERROR(" & valueExpr & ",FALSE)),IFERROR(" & valueExpr & ",0)>=" & minTxt & ",IFERROR(" & valueExpr & ",0)<=" & maxTxt & "))"
@@ -669,8 +1103,23 @@ Private Sub ApplyDecimalTextValidation(ByVal target As Range, ByVal minVal As Do
     End With
 End Sub
 
-Private Sub ApplyWholeValidation(ByVal target As Range, ByVal minVal As Long, ByVal maxVal As Long)
-    With target.Validation
+' ===========================================================================
+' ApplyWholeValidation
+' ===========================================================================
+' Назначение:
+'   Назначает стандартную валидацию для целых чисел.
+'   Используется в ячейках, где Excel должен принимать только целочисленные значения.
+' Основные действия:
+'   - Удаляет прежнюю проверку.
+'   - Назначает правило `xlValidateWholeNumber` с заданными границами.
+' Параметры:
+'   Target - ячейка или диапазон проверки.
+'   minVal - минимально допустимое целое значение.
+'   maxVal - максимально допустимое целое значение.
+' Эффект выполнения:
+'   Excel запрещает ввод дробных и выходящих за диапазон значений.
+Private Sub ApplyWholeValidation(ByVal Target As Range, ByVal minVal As Long, ByVal maxVal As Long)
+    With Target.Validation
         .Delete
         .Add Type:=xlValidateWholeNumber, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, _
             Formula1:=minVal, Formula2:=maxVal
@@ -678,14 +1127,30 @@ Private Sub ApplyWholeValidation(ByVal target As Range, ByVal minVal As Long, By
     End With
 End Sub
 
-Private Sub ApplyWholeTextValidation(ByVal target As Range, ByVal minVal As Long, ByVal maxVal As Long)
+' ===========================================================================
+' ApplyWholeTextValidation
+' ===========================================================================
+' Назначение:
+'   Назначает валидацию для текстового поля, которое должно содержать целое число.
+'   Полезно там, где значение хранится как текст, но по смыслу должно оставаться
+'   допустимым числовым идентификатором без дробной части.
+' Основные действия:
+'   - Строит формульное выражение для проверки содержимого ячейки.
+'   - Разрешает пустое значение либо целое число в заданных границах.
+' Параметры:
+'   Target - ячейка или диапазон с текстовым числовым вводом.
+'   minVal - нижняя граница допустимого целого значения.
+'   maxVal - верхняя граница допустимого целого значения.
+' Эффект выполнения:
+'   Excel отбрасывает нечисловой текст и дробные значения в целочисленных полях.
+Private Sub ApplyWholeTextValidation(ByVal Target As Range, ByVal minVal As Long, ByVal maxVal As Long)
     Dim addr As String
     Dim valueExpr As String
 
-    addr = target.Cells(1, 1).Address(False, False)
+    addr = Target.Cells(1, 1).Address(False, False)
     valueExpr = "VALUE(" & addr & ")"
 
-    With target.Validation
+    With Target.Validation
         .Delete
         .Add Type:=xlValidateCustom, AlertStyle:=xlValidAlertStop, _
             Formula1:="=OR(LEN(TRIM(" & addr & "))=0,AND(ISNUMBER(IFERROR(" & valueExpr & ",FALSE)),IFERROR(" & valueExpr & ",0)=INT(IFERROR(" & valueExpr & ",0)),IFERROR(" & valueExpr & ",0)>=" & CStr(minVal) & ",IFERROR(" & valueExpr & ",0)<=" & CStr(maxVal) & "))"
@@ -693,6 +1158,21 @@ Private Sub ApplyWholeTextValidation(ByVal target As Range, ByVal minVal As Long
     End With
 End Sub
 
+' ===========================================================================
+' RefreshWorkbookColors
+' ===========================================================================
+' Назначение:
+'   Полностью пересобирает цветовое оформление всей книги.
+'   Это главный сценарий синхронизации интерфейса после изменения цветовых настроек,
+'   очистки листов или других операций, которые могли нарушить консистентность оформления.
+' Основные действия:
+'   - Получает ссылки на все рабочие листы книги.
+'   - Снимает защиту и временно отключает события и перерисовку.
+'   - Гарантирует наличие блока настройки цветов и считывает актуальную палитру.
+'   - Вызывает специализированные процедуры перекраски для каждого листа.
+'   - Возвращает защиту листов и стандартные настройки Excel.
+' Эффект выполнения:
+'   Процедура массово обновляет внешний вид книги, не меняя бизнес-данные пользователя.
 Public Sub RefreshWorkbookColors()
     On Error GoTo EH
 
@@ -729,6 +1209,8 @@ Public Sub RefreshWorkbookColors()
     RefreshNotesSheetColors wsNotes, clrLocked, clrEditHasColor, clrEditable, clrHeader
 
 Cleanup:
+    ' Возвращаем защиту листов через тихие helper-процедуры,
+    ' чтобы cleanup не создавал вложенный обработчик ошибок.
     ProtectSheetQuiet wsDisclaimer
     ProtectSheetQuiet wsIn
     ProtectSheetQuiet wsOut
@@ -742,6 +1224,21 @@ EH:
     Resume Cleanup
 End Sub
 
+' ===========================================================================
+' PickCellColor
+' ===========================================================================
+' Назначение:
+'   Открывает встроенный диалог Excel для выбора цвета одной строки цветовых настроек.
+'   Это общий внутренний helper для всех кнопок выбора цвета на листе ввода.
+' Основные действия:
+'   - Находит лист "Ввод" и временно снимает его защиту.
+'   - Выделяет ячейку нужной строки в колонке образцов цвета.
+'   - Открывает системный диалог выбора узора/цвета.
+'   - Если цвет изменился, запускает перекраску всей книги.
+' Параметры:
+'   rowNum - номер строки в блоке цветовых настроек.
+' Эффект выполнения:
+'   Пользователь может изменить один из цветов интерфейса, после чего книга синхронизируется.
 Private Sub PickCellColor(ByVal rowNum As Long)
     Dim wsIn As Worksheet
     Dim changed As Boolean
@@ -753,34 +1250,94 @@ Private Sub PickCellColor(ByVal rowNum As Long)
     If changed Then RefreshWorkbookColors
 End Sub
 
+' ===========================================================================
+' PickColorLocked
+' ===========================================================================
+' Назначение:
+'   Точка входа для выбора цвета заблокированных ячеек.
+' Эффект выполнения:
+'   Запускает общий сценарий выбора цвета для строки заблокированного состояния.
 Public Sub PickColorLocked()
     PickCellColor CLR_ROW_LOCKED
 End Sub
 
+' ===========================================================================
+' PickColorEditable
+' ===========================================================================
+' Назначение:
+'   Точка входа для выбора цвета редактируемых ячеек.
+' Эффект выполнения:
+'   Запускает общий сценарий выбора цвета для редактируемого состояния.
 Public Sub PickColorEditable()
     PickCellColor CLR_ROW_EDITABLE
 End Sub
 
+' ===========================================================================
+' PickColorMrsHeader
+' ===========================================================================
+' Назначение:
+'   Точка входа для выбора цвета заголовков дат на листе MRS.
+' Эффект выполнения:
+'   Запускает общий сценарий выбора соответствующего цвета.
 Public Sub PickColorMrsHeader()
     PickCellColor CLR_ROW_MRS_HEADER
 End Sub
 
+' ===========================================================================
+' PickColorMrsSub
+' ===========================================================================
+' Назначение:
+'   Точка входа для выбора цвета строк бригад на листе MRS.
+' Эффект выполнения:
+'   Запускает общий сценарий выбора соответствующего цвета.
 Public Sub PickColorMrsSub()
     PickCellColor CLR_ROW_MRS_SUBHEADER
 End Sub
 
+' ===========================================================================
+' PickColorMrsOrder
+' ===========================================================================
+' Назначение:
+'   Точка входа для выбора цвета подтверждённых заказов.
+' Эффект выполнения:
+'   Запускает общий сценарий выбора соответствующего цвета.
 Public Sub PickColorMrsOrder()
     PickCellColor CLR_ROW_MRS_ORDER
 End Sub
 
+' ===========================================================================
+' PickColorMrsOrderUnconf
+' ===========================================================================
+' Назначение:
+'   Точка входа для выбора цвета неподтверждённых заказов.
+' Эффект выполнения:
+'   Запускает общий сценарий выбора соответствующего цвета.
 Public Sub PickColorMrsOrderUnconf()
     PickCellColor CLR_ROW_MRS_ORDER_UNCONF
 End Sub
 
+' ===========================================================================
+' PickColorHeader
+' ===========================================================================
+' Назначение:
+'   Точка входа для выбора цвета шапок и служебных заголовков.
+' Эффект выполнения:
+'   Запускает общий сценарий выбора соответствующего цвета.
 Public Sub PickColorHeader()
     PickCellColor CLR_ROW_HEADER
 End Sub
 
+' ===========================================================================
+' UW
+' ===========================================================================
+' Назначение:
+'   Собирает Unicode-строку из массива числовых кодов символов.
+'   Эта функция используется для хранения русскоязычных строк в виде кодов, чтобы
+'   модуль был устойчивее к проблемам кодировки в VBA-источнике.
+' Параметры:
+'   codes - набор числовых кодов символов.
+' Возвращаемое значение:
+'   Готовая строка Unicode, собранная из переданных кодов.
 Public Function UW(ParamArray codes() As Variant) As String
     Dim i As Long
     For i = LBound(codes) To UBound(codes)
@@ -788,6 +1345,19 @@ Public Function UW(ParamArray codes() As Variant) As String
     Next i
 End Function
 
+' ===========================================================================
+' ZQ
+' ===========================================================================
+' Назначение:
+'   Выполняет внутреннюю проверку допустимости запуска основных сценариев.
+'   Функция сравнивает скрытый маркер на листе ввода с вычисленным эталоном и
+'   используется как ранний предохранитель перед крупными операциями.
+' Основные действия:
+'   - Читает служебное значение с листа ввода.
+'   - Собирает ожидаемую строку из закодированного массива.
+'   - Сравнивает фактическое и ожидаемое значения побайтно.
+' Возвращаемое значение:
+'   True, если внутренняя проверка пройдена; иначе False.
 Private Function ZQ() As Boolean
     ZQ = False
     On Error Resume Next
@@ -806,10 +1376,40 @@ Private Function ZQ() As Boolean
     ZQ = (StrComp(v, xV, vbBinaryCompare) = 0)
 End Function
 
+' ===========================================================================
+' NumForFormula
+' ===========================================================================
+' Назначение:
+'   Преобразует число в текст для безопасной подстановки в Excel-формулу.
+'   Независимо от локали Excel итоговая строка использует точку как разделитель,
+'   что удобно при ручной сборке формульных выражений.
+' Параметры:
+'   val - числовое значение для вставки в формулу.
+' Возвращаемое значение:
+'   Строка с числом в формульно-совместимом виде.
 Private Function NumForFormula(ByVal val As Double) As String
     NumForFormula = Replace$(Trim$(Str$(val)), Application.DecimalSeparator, ".")
 End Function
 
+' ===========================================================================
+' GenerateAndAppendHistory
+' ===========================================================================
+' Назначение:
+'   Выполняет основной расчёт калькулятора рабочего времени.
+'   Это центральная процедура модуля: она читает параметры с листа "Ввод",
+'   строит цепочку операций на листе результата, а затем переносит итог в историю.
+' Основные действия:
+'   - Проверяет защитный маркер запуска через ZQ().
+'   - Снимает защиту с листов, подготавливает цветовые настройки и очищает прошлый результат.
+'   - Читает даты, время, паузы, параметры обеда, список работников и строки операций.
+'   - Для каждой операции и каждого выбранного исполнителя рассчитывает старт, окончание,
+'     длительность и связанные служебные поля.
+'   - Формирует текстовый блок Z7 и переносит итоговый набор строк в историю.
+'   - Обновляет стартовые дату и время на листе ввода по фактическому окончанию цепочки.
+'   - Возвращает защиту листов и сообщает пользователю количество сформированных строк.
+' Эффект выполнения:
+'   На листе результата строится новая таблица расчёта, история дополняется новыми строками,
+'   а лист ввода синхронизируется с финальной точкой времени последней операции.
 Public Sub GenerateAndAppendHistory()
     If Not ZQ() Then
         MsgBox UW(1054, 1096, 1080, 1073, 1082, 1072, 33), vbCritical
@@ -822,6 +1422,8 @@ Public Sub GenerateAndAppendHistory()
     Set wsOut = ThisWorkbook.Worksheets(3)
     Set wsHist = ThisWorkbook.Worksheets(4)
 
+    ' На время расчёта снимаем защиту и отключаем события,
+    ' чтобы служебные записи не запускали обработчики повторно.
     wsIn.Unprotect UW(49, 49, 52, 55, 48, 57)
     wsOut.Unprotect UW(49, 49, 52, 55, 48, 57)
     wsHist.Unprotect UW(49, 49, 52, 55, 48, 57)
@@ -834,6 +1436,7 @@ Public Sub GenerateAndAppendHistory()
     Dim clrHeader As Long
     ReadAllColors wsIn, clrLocked, clrEditHasColor, clrEditable, clrMrsHeader, clrMrsSub, clrMrsOrder, clrMrsOrderUnconf, clrHeader
 
+    ' Результат пересобирается с нуля, поэтому старые строки сначала удаляются.
     ClearResultArea wsOut
     EnsureSheetHeaders wsOut, wsHist
 
@@ -860,7 +1463,7 @@ Public Sub GenerateAndAppendHistory()
 
     Dim lunch1 As Date, lunch2 As Date, hasLunch2 As Boolean
     Dim lunchDurMin As Double, lunchDurDays As Double
-    lunchDurMin = Val(Replace(CStr(wsIn.Range("B12").Value), ",", "."))
+    lunchDurMin = val(Replace(CStr(wsIn.Range("B12").Value), ",", "."))
     ParseLunchParams wsIn.Range("B10").Value, wsIn.Range("B11").Value, lunchDurMin, lunch1, lunch2, hasLunch2, lunchDurDays
 
     Dim zStatus As String, zExtra As String, zRec As String, zRiz As String, zK As String
@@ -884,6 +1487,8 @@ Public Sub GenerateAndAppendHistory()
     opRow = 4
     opNum = 0
 
+    ' Основной цикл проходит по строкам операций на листе ввода.
+    ' Каждая найденная операция затем разворачивается в одну или несколько строк результата.
     Do While opRow <= 23
         Dim opName As String
         opName = Trim$(CStr(wsIn.Cells(opRow, 9).Value))
@@ -892,13 +1497,13 @@ Public Sub GenerateAndAppendHistory()
         opNum = opNum + 1
 
         Dim durVal As Double, durUnit As String, timeMode As String
-        durVal = Val(Replace(CStr(wsIn.Cells(opRow, 11).Value), ",", "."))
+        durVal = val(Replace(CStr(wsIn.Cells(opRow, 11).Value), ",", "."))
         If durVal < 0 Then durVal = 0
         durUnit = NormalizeUnit(wsIn.Cells(opRow, 12).Value)
         timeMode = LCase$(Trim$(CStr(wsIn.Cells(opRow, 13).Value)))
 
         Dim breakVal As Double, breakUnit As String
-        breakVal = Val(Replace(CStr(wsIn.Cells(opRow, 14).Value), ",", "."))
+        breakVal = val(Replace(CStr(wsIn.Cells(opRow, 14).Value), ",", "."))
         If breakVal < 0 Then breakVal = 0
         breakUnit = NormalizeUnit(wsIn.Cells(opRow, 15).Value)
 
@@ -935,6 +1540,8 @@ Public Sub GenerateAndAppendHistory()
 
         Dim w As Long, isFirstWorkerInOp As Boolean
         isFirstWorkerInOp = True
+        ' Внутри операции создаём отдельную строку для каждого выбранного исполнителя.
+        ' Первый исполнитель задаёт базовые значения, остальные наследуют часть полей формулами.
         For w = 1 To workerCount
             If IsWorkerSelected(workerSpec, w) Then
                 Dim workerValue As Variant, workerNumFmt As String
@@ -956,6 +1563,8 @@ Public Sub GenerateAndAppendHistory()
                 crossed = (CDbl(startDT) <> CDbl(intendedStart))
                 endDT = ComputeEndWithLunch(startDT, durDays, lunch1, lunch2, hasLunch2, lunchDurDays, crossed)
 
+                ' Заполняем строку результата как самостоятельную запись операции,
+                ' но повторяющиеся значения внутри одной группы связываем через формулы.
                 wsOut.Cells(outRow, 2).Value = opNum
                 Dim pdtvVal As Variant
                 pdtvVal = wsIn.Cells(opRow, 8).Value
@@ -1025,6 +1634,8 @@ Public Sub GenerateAndAppendHistory()
         Exit Sub
     End If
 
+    ' После построения данных приводим лист результата к финальному виду:
+    ' форматы времени, границы и ширины нужны уже до переноса блока в историю.
     wsOut.Range("E2:E" & outRow - 1).NumberFormat = "0.00"
     wsOut.Range("F2:F" & outRow - 1).NumberFormat = "0.00"
     wsOut.Range("L2:L" & outRow - 1).NumberFormat = "0.00"
@@ -1043,6 +1654,7 @@ Public Sub GenerateAndAppendHistory()
     wsOut.Calculate
 
     Dim zRow As Long, zr As Long
+    ' Блок Z7 формирует текстовое резюме расчёта для выдачи и для последующей записи в историю.
     zRow = outRow + 1
     wsOut.Cells(zRow, 2).Value = "Z7"
     wsOut.Cells(zRow + 1, 2).Value = "1. " & UW(1089, 1086, 1089, 1090, 1086, 1103, 1085, 1080, 1077, 32, 1086, 1073, 1098, 1077, 1082, 1090, 1072, 32, 1088, 1077, 1084, 1086, 1085, 1090, 1072, 32, 1076, 1086, 32, 1085, 1072, 1095, 1072, 1083, 1072, 32, 1088, 1072, 1073, 1086, 1090) & ": " & zStatus
@@ -1059,6 +1671,8 @@ Public Sub GenerateAndAppendHistory()
         wsOut.Range(wsOut.Cells(zr, 2), wsOut.Cells(zr, 22)).WrapText = True
     Next zr
 
+    ' Сначала переносим готовый расчёт в историю, затем обновляем оформление
+    ' и сохраняем стартовую точку для следующего запуска.
     AppendResultToHistory wsHist, wsOut, wsIn, outRow - 1, zRow + 5, workerCount, lunch1, lunch2, lunchDurMin, primaryIsMin, clrEditHasColor, clrEditable, clrMrsOrder, clrMrsOrderUnconf
     RefreshResultSheetColors wsOut, clrLocked
     RefreshHistorySheetColors wsHist, clrLocked, clrEditHasColor, clrEditable, clrMrsOrder, clrMrsOrderUnconf, clrHeader
@@ -1079,6 +1693,8 @@ Public Sub GenerateAndAppendHistory()
 
     Dim errMsg As String
 Cleanup:
+    ' Quiet-helper'ы здесь нужны для безопасного завершения даже в аварийном сценарии:
+    ' сначала возвращается защита листов, затем восстанавливается редактируемая ячейка паузы.
     ProtectSheetQuiet wsOut
     ProtectSheetQuiet wsHist
     Application.EnableEvents = True
@@ -1094,6 +1710,22 @@ EH:
     Resume Cleanup
 End Sub
 
+' ===========================================================================
+' EnsureSheetHeaders
+' ===========================================================================
+' Назначение:
+'   Восстанавливает служебные заголовки на листе результата и базовый заголовок истории.
+'   Процедура нужна перед генерацией новых расчётных строк, чтобы структура листов
+'   всегда была предсказуемой и не зависела от предыдущих операций очистки.
+' Основные действия:
+'   - Заполняет строку заголовков результата по всем рабочим колонкам A:V.
+'   - Выделяет шапку жирным шрифтом.
+'   - Восстанавливает заголовок "История" на листе истории.
+' Параметры:
+'   wsOut - лист результата.
+'   wsHist - лист истории.
+' Эффект выполнения:
+'   Процедура меняет только шапки листов и их форматирование.
 Private Sub EnsureSheetHeaders(ByVal wsOut As Worksheet, ByVal wsHist As Worksheet)
     wsOut.Cells(1, 1).Value = ""
     wsOut.Cells(1, 2).Value = UW(8470)
@@ -1123,6 +1755,20 @@ Private Sub EnsureSheetHeaders(ByVal wsOut As Worksheet, ByVal wsHist As Workshe
     SetCellBoldSafe wsHist.Cells(3, 2), True, "EnsureHeaders wsHist"
 End Sub
 
+' ===========================================================================
+' ClearResultAndHistory
+' ===========================================================================
+' Назначение:
+'   Сбрасывает расчётную часть книги к исходному рабочему состоянию.
+'   Используется, когда нужно полностью очистить результат и историю перед новым расчётом.
+' Основные действия:
+'   - Проверяет допустимость запуска через ZQ().
+'   - Сбрасывает базовые дату и время на листе ввода.
+'   - Очищает лист результата.
+'   - Очищает лист истории.
+'   - После очистки запускает полную перекраску книги.
+' Эффект выполнения:
+'   Пользователь получает пустые листы результата и истории при сохранении структуры книги.
 Public Sub ClearResultAndHistory()
     If Not ZQ() Then
         MsgBox UW(1054, 1096, 1080, 1073, 1082, 1072, 33), vbCritical
@@ -1154,6 +1800,8 @@ Public Sub ClearResultAndHistory()
     Exit Sub
 
 Cleanup:
+    ' После полного сброса защита листов восстанавливается единообразно
+    ' тем же quiet-helper'ом, что и в других cleanup-блоках модуля.
     ProtectSheetQuiet wsIn
     ProtectSheetQuiet wsR
     ProtectSheetQuiet wsH
@@ -1162,6 +1810,20 @@ EH:
     Resume Cleanup
 End Sub
 
+' ===========================================================================
+' ClearResultArea
+' ===========================================================================
+' Назначение:
+'   Удаляет все расчётные строки с листа результата, оставляя шапку.
+'   Процедура используется как в полном сбросе книги, так и перед построением нового результата.
+' Основные действия:
+'   - Определяет фактическую нижнюю границу использованной области.
+'   - Временно отключает события Excel.
+'   - Удаляет строки результата, начиная со второй.
+' Параметры:
+'   wsOut - лист результата.
+' Эффект выполнения:
+'   Лист результата очищается от старых расчётных данных.
 Private Sub ClearResultArea(ByVal wsOut As Worksheet)
     Dim lastRow As Long
     lastRow = wsOut.UsedRange.Row + wsOut.UsedRange.Rows.Count - 1
@@ -1174,6 +1836,21 @@ Private Sub ClearResultArea(ByVal wsOut As Worksheet)
     End If
 End Sub
 
+' ===========================================================================
+' ClearHistoryArea
+' ===========================================================================
+' Назначение:
+'   Удаляет все блоки истории, оставляя служебную верхнюю часть листа.
+'   Используется при полном сбросе истории перед новым циклом работы.
+' Основные действия:
+'   - Определяет фактический конец данных на листе истории.
+'   - Временно отключает события.
+'   - Удаляет все строки, начиная с четвёртой.
+' Параметры:
+'   wsHist - лист истории.
+'   clrLocked - базовый цвет листа; в текущей реализации параметр передаётся для согласованности интерфейса вызова.
+' Эффект выполнения:
+'   История очищается от сохранённых расчётных блоков.
 Private Sub ClearHistoryArea(ByVal wsHist As Worksheet, ByVal clrLocked As Long)
     Dim lastRow As Long
     lastRow = wsHist.UsedRange.Row + wsHist.UsedRange.Rows.Count - 1
@@ -1186,6 +1863,23 @@ Private Sub ClearHistoryArea(ByVal wsHist As Worksheet, ByVal clrLocked As Long)
     End If
 End Sub
 
+' ===========================================================================
+' SyncWorkerIdInputs
+' ===========================================================================
+' Назначение:
+'   Подготавливает блок ввода работников под указанное количество исполнителей.
+'   Процедура управляет видимостью строк, подписями и стилями в области ввода идентификаторов.
+' Основные действия:
+'   - Нормализует количество работников в допустимый диапазон 1..10.
+'   - Обеспечивает наличие и актуальность цветовых настроек.
+'   - Восстанавливает заголовок блока исполнителей.
+'   - Проходит по 10 возможным строкам и показывает только нужное количество.
+'   - Для каждой строки вызывает отдельную процедуру оформления.
+' Параметры:
+'   wsIn - лист "Ввод".
+'   workerCount - количество работников, которое должно быть активно на листе.
+' Эффект выполнения:
+'   Лист ввода адаптируется под текущее число исполнителей без изменения бизнес-логики расчёта.
 Public Sub SyncWorkerIdInputs(ByVal wsIn As Worksheet, ByVal workerCount As Long)
     Dim i As Long
 
@@ -1212,6 +1906,23 @@ Public Sub SyncWorkerIdInputs(ByVal wsIn As Worksheet, ByVal workerCount As Long
     Next i
 End Sub
 
+' ===========================================================================
+' SyncOperationRows
+' ===========================================================================
+' Назначение:
+'   Приводит блок ввода операций к нужному количеству активных строк.
+'   Это одна из ключевых процедур динамического интерфейса листа "Ввод".
+' Основные действия:
+'   - Нормализует допустимое число операций в диапазон 1..20.
+'   - Считывает текущие цветовые настройки и временно отключает события Excel.
+'   - Показывает нужное число строк операций и скрывает лишние.
+'   - Подставляет стандартные значения в пустые ячейки операций.
+'   - Синхронизирует связанные колонки с типами длительностей и перерывов.
+' Параметры:
+'   wsIn - лист "Ввод".
+'   opCount - число строк операций, которое должно остаться активным.
+' Эффект выполнения:
+'   Рабочая область операций на листе ввода становится согласованной с текущим числом операций.
 Public Sub SyncOperationRows(ByVal wsIn As Worksheet, ByVal opCount As Long)
     Dim prevEvents As Boolean
     prevEvents = Application.EnableEvents
@@ -1304,6 +2015,21 @@ Cleanup:
     Application.EnableEvents = prevEvents
 End Sub
 
+' ===========================================================================
+' SanitizeWorkerIdCell
+' ===========================================================================
+' Назначение:
+'   Очищает ввод идентификатора исполнителя непосредственно в ячейке Excel.
+'   Процедура приводит пользовательский ввод к внутреннему формату идентификатора
+'   и оставляет в ячейке либо корректное значение, либо пустоту.
+' Основные действия:
+'   - Нормализует строку через `NormalizeWorkerIdText`.
+'   - Устанавливает формат отображения идентификатора как восьмизначного числа.
+'   - Очищает ячейку, если после нормализации данных не осталось.
+' Параметры:
+'   targetCell - ячейка с идентификатором исполнителя.
+' Эффект выполнения:
+'   Пользовательский ввод в поле исполнителя приводится к единому безопасному формату.
 Public Sub SanitizeWorkerIdCell(ByVal targetCell As Range)
     If targetCell Is Nothing Then Exit Sub
 
@@ -1318,6 +2044,26 @@ Public Sub SanitizeWorkerIdCell(ByVal targetCell As Range)
     End If
 End Sub
 
+' ===========================================================================
+' StyleWorkerInputRow
+' ===========================================================================
+' Назначение:
+'   Оформляет одну строку блока исполнителей на листе "Ввод".
+'   Процедура используется при синхронизации количества работников и отвечает
+'   одновременно за видимость, блокировку и стиль метки с полем ввода.
+' Основные действия:
+'   - Оформляет колонку подписи исполнителя как служебную и заблокированную.
+'   - Для поля идентификатора назначает либо редактируемый стиль, либо скрывает/очищает строку.
+'   - Настраивает границы, формат номера и доступность редактирования.
+' Параметры:
+'   wsIn - лист "Ввод".
+'   rowNum - номер строки блока исполнителей.
+'   isVisible - должна ли строка быть активной и видимой для пользователя.
+'   clrLocked - цвет заблокированного состояния.
+'   clrEditHasColor - признак пользовательского цвета редактируемых ячеек.
+'   clrEditable - цвет редактируемого состояния.
+' Эффект выполнения:
+'   Конкретная строка исполнителя приводится к нужному состоянию интерфейса.
 Private Sub StyleWorkerInputRow(ByVal wsIn As Worksheet, ByVal rowNum As Long, ByVal isVisible As Boolean, _
     ByVal clrLocked As Long, _
     ByVal clrEditHasColor As Boolean, ByVal clrEditable As Long)
@@ -1346,6 +2092,22 @@ Private Sub StyleWorkerInputRow(ByVal wsIn As Worksheet, ByVal rowNum As Long, B
     End With
 End Sub
 
+' ===========================================================================
+' GetWorkerValue
+' ===========================================================================
+' Назначение:
+'   Возвращает нормализованное значение исполнителя для дальнейшей записи в расчёт.
+'   Если пользователь не ввёл идентификатор, функция может подставить номер работника
+'   как резервное значение.
+' Основные действия:
+'   - Читает текст идентификатора из блока исполнителей.
+'   - Нормализует его с учётом fallback на номер работника.
+'   - Возвращает либо числовой идентификатор, либо индекс исполнителя.
+' Параметры:
+'   wsIn - лист "Ввод".
+'   workerIndex - порядковый номер исполнителя в блоке.
+' Возвращаемое значение:
+'   Нормализованное значение исполнителя для записи в результат и историю.
 Private Function GetWorkerValue(ByVal wsIn As Worksheet, ByVal workerIndex As Long) As Variant
     Dim rawText As String
     rawText = Trim$(CStr(wsIn.Cells(3 + workerIndex, 5).Value))
@@ -1358,6 +2120,20 @@ Private Function GetWorkerValue(ByVal wsIn As Worksheet, ByVal workerIndex As Lo
     End If
 End Function
 
+' ===========================================================================
+' GetWorkerNumberFormat
+' ===========================================================================
+' Назначение:
+'   Определяет формат отображения идентификатора исполнителя.
+'   Нужна для сохранения различия между пустым значением и осмысленным восьмизначным кодом.
+' Основные действия:
+'   - Читает и нормализует идентификатор исполнителя.
+'   - Возвращает либо общий формат, либо строгий формат `00000000`.
+' Параметры:
+'   wsIn - лист "Ввод".
+'   workerIndex - номер строки исполнителя.
+' Возвращаемое значение:
+'   Строка формата Excel для отображения идентификатора исполнителя.
 Private Function GetWorkerNumberFormat(ByVal wsIn As Worksheet, ByVal workerIndex As Long) As String
     Dim rawText As String
     rawText = Trim$(CStr(wsIn.Cells(3 + workerIndex, 5).Value))
@@ -1370,6 +2146,23 @@ Private Function GetWorkerNumberFormat(ByVal wsIn As Worksheet, ByVal workerInde
     End If
 End Function
 
+' ===========================================================================
+' NormalizeWorkerIdText
+' ===========================================================================
+' Назначение:
+'   Приводит ввод идентификатора исполнителя к каноническому виду.
+'   Функция оставляет только цифры, ограничивает длину восемью символами и при
+'   необходимости дополняет значение ведущими нулями.
+' Основные действия:
+'   - Удаляет все нецифровые символы.
+'   - При пустом вводе либо возвращает пустую строку, либо использует fallback.
+'   - Ограничивает длину идентификатора и выравнивает его до восьми знаков.
+' Параметры:
+'   rawText - исходный текстовый ввод.
+'   workerIndex - номер исполнителя, используемый как резервное значение.
+'   fallbackToIndex - признак, нужно ли подставлять номер исполнителя при пустом вводе.
+' Возвращаемое значение:
+'   Строка идентификатора в стандартизированном восьмизначном виде либо пустая строка.
 Private Function NormalizeWorkerIdText(ByVal rawText As String, ByVal workerIndex As Long, ByVal fallbackToIndex As Boolean) As String
     Dim digits As String
     digits = DigitsOnly(Trim$(rawText))
@@ -1389,6 +2182,21 @@ Private Function NormalizeWorkerIdText(ByVal rawText As String, ByVal workerInde
     NormalizeWorkerIdText = digits
 End Function
 
+' ===========================================================================
+' NormalizeDecimal
+' ===========================================================================
+' Назначение:
+'   Нормализует произвольный текстовый ввод десятичного числа.
+'   Функция удаляет лишние символы, сохраняет только первую десятичную часть и
+'   приводит результат к компактной форме с запятой.
+' Основные действия:
+'   - Проходит по символам исходной строки.
+'   - Оставляет цифры и только один десятичный разделитель.
+'   - Ограничивает целую часть шестью знаками, а дробную двумя.
+' Параметры:
+'   rawText - исходный текст, введённый пользователем.
+' Возвращаемое значение:
+'   Строка с нормализованным десятичным числом либо пустая строка.
 Public Function NormalizeDecimal(ByVal rawText As String) As String
     Dim i As Long, ch As String
     Dim intPart As String, decPart As String
@@ -1423,6 +2231,20 @@ Public Function NormalizeDecimal(ByVal rawText As String) As String
     End If
 End Function
 
+' ===========================================================================
+' NormalizeRizInput
+' ===========================================================================
+' Назначение:
+'   Подготавливает ввод для поля РИЗ.
+'   Значение сначала нормализуется как десятичное число, после чего к нему
+'   добавляется единица измерения в человекочитаемом виде.
+' Основные действия:
+'   - Использует `NormalizeDecimal` как базовый механизм очистки.
+'   - Если число валидно, дописывает текст единицы измерения.
+' Параметры:
+'   rawText - исходный ввод пользователя.
+' Возвращаемое значение:
+'   Нормализованный текст для поля РИЗ либо пустая строка.
 Public Function NormalizeRizInput(ByVal rawText As String) As String
     Dim normalized As String
     normalized = NormalizeDecimal(rawText)
@@ -1433,10 +2255,36 @@ Public Function NormalizeRizInput(ByVal rawText As String) As String
     End If
 End Function
 
+' ===========================================================================
+' NormalizeKInput
+' ===========================================================================
+' Назначение:
+'   Подготавливает ввод для коэффициента K.
+'   В отличие от РИЗ здесь не добавляется текстовая приставка: сохраняется только
+'   нормализованное числовое представление.
+' Параметры:
+'   rawText - исходный текст пользователя.
+' Возвращаемое значение:
+'   Нормализованное строковое представление коэффициента K.
 Public Function NormalizeKInput(ByVal rawText As String) As String
     NormalizeKInput = NormalizeDecimal(rawText)
 End Function
 
+' ===========================================================================
+' SanitizeDecimalEntryCell
+' ===========================================================================
+' Назначение:
+'   Применяет нормализацию десятичного ввода непосредственно к ячейке Excel.
+'   Используется в обработчиках изменений истории, MRS и входных полей.
+' Основные действия:
+'   - Временно переводит ячейку в текстовый формат.
+'   - Нормализует значение через `NormalizeDecimal`.
+'   - Либо записывает корректное число, либо очищает ячейку, либо подставляет ноль.
+' Параметры:
+'   targetCell - редактируемая ячейка с десятичным значением.
+'   blankAsZero - нужно ли заменять пустой результат на ноль.
+' Эффект выполнения:
+'   Ячейка получает согласованное числовое значение без лишних символов.
 Public Sub SanitizeDecimalEntryCell(ByVal targetCell As Range, Optional ByVal blankAsZero As Boolean = True)
     Dim cleaned As String
 
@@ -1452,10 +2300,26 @@ Public Sub SanitizeDecimalEntryCell(ByVal targetCell As Range, Optional ByVal bl
             targetCell.ClearContents
         End If
     Else
-        targetCell.Value = Val(Replace(cleaned, ",", "."))
+        targetCell.Value = val(Replace(cleaned, ",", "."))
     End If
 End Sub
 
+' ===========================================================================
+' SanitizeWholeTextCell
+' ===========================================================================
+' Назначение:
+'   Очищает ячейку, которая должна содержать целое число в текстовом виде.
+'   Это удобно для полей, где важен не арифметический тип Excel, а набор допустимых цифр.
+' Основные действия:
+'   - Извлекает из исходного ввода только цифры.
+'   - Ограничивает длину результата по `maxDigits`.
+'   - Записывает очищенный текст обратно или заменяет пустоту на ноль.
+' Параметры:
+'   targetCell - ячейка с целочисленным текстовым вводом.
+'   maxDigits - максимальное количество цифр, которое допускается сохранить.
+'   blankAsZero - нужно ли заменять пустой результат на строку "0".
+' Эффект выполнения:
+'   Ячейка очищается от посторонних символов и приводится к допустимому виду.
 Public Sub SanitizeWholeTextCell(ByVal targetCell As Range, ByVal maxDigits As Long, Optional ByVal blankAsZero As Boolean = True)
     Dim digits As String
 
@@ -1478,6 +2342,21 @@ Public Sub SanitizeWholeTextCell(ByVal targetCell As Range, ByVal maxDigits As L
     End If
 End Sub
 
+' ===========================================================================
+' SanitizeTimeCell
+' ===========================================================================
+' Назначение:
+'   Нормализует ввод времени в пользовательской ячейке.
+'   Процедура принимает как текстовые представления времени, так и внутренний
+'   числовой формат Excel, после чего приводит значение к единому виду.
+' Основные действия:
+'   - Пробует интерпретировать содержимое как текст времени или число Excel.
+'   - Устанавливает формат отображения `hh:mm:ss`.
+'   - При невалидном вводе очищает ячейку.
+' Параметры:
+'   targetCell - ячейка со временем.
+' Эффект выполнения:
+'   В ячейке остаётся корректное время Excel либо пустое значение.
 Public Sub SanitizeTimeCell(ByVal targetCell As Range)
     Dim rawText As String
     Dim parsedTime As Date
@@ -1511,6 +2390,24 @@ InvalidValue:
     Resume Cleanup
 End Sub
 
+' ===========================================================================
+' HandleHistorySheetChange
+' ===========================================================================
+' Назначение:
+'   Централизованно обрабатывает пользовательские изменения на листе "История".
+'   После переноса логики из модуля листа эта процедура вызывается из
+'   обработчика `Workbook_SheetChange` и позволяет оставить сам лист без VBA-кода.
+' Основные действия:
+'   - Временно отключает события и снимает защиту с листа.
+'   - При изменении статуса в колонке B перекрашивает всю строку заказа.
+'   - Для редактируемых десятичных колонок запускает санитизацию ввода.
+'   - Для редактируемых целочисленных колонок оставляет только допустимые цифры.
+'   - Возвращает защиту листа и повторно включает события Excel.
+' Параметры:
+'   ws - лист истории, в котором произошло изменение.
+'   Target - диапазон изменённых пользователем ячеек.
+' Эффект выполнения:
+'   Исправляет пользовательский ввод и поддерживает корректное цветовое состояние строк истории.
 Public Sub HandleHistorySheetChange(ByVal ws As Worksheet, ByVal Target As Range)
     On Error GoTo SafeExit
     If ws Is Nothing Then Exit Sub
@@ -1559,10 +2456,30 @@ NextHistoryWholeCell:
     End If
 
 SafeExit:
+    ' Защита листа возвращается отдельным helper'ом,
+    ' чтобы безопасный выход не переключал внешний error handler.
     ProtectSheetQuiet ws
     Application.EnableEvents = True
 End Sub
 
+' ===========================================================================
+' HandleMRSSheetChange
+' ===========================================================================
+' Назначение:
+'   Централизованно обрабатывает изменения на листе "Парсинг MRS".
+'   Процедура выполняет ту же роль, что и обработчик истории, но учитывает
+'   структуру и набор редактируемых колонок именно для листа MRS.
+' Основные действия:
+'   - Временно снимает защиту и отключает события.
+'   - При изменении статуса в колонке B перекрашивает строку заказа.
+'   - Нормализует десятичные поля MRS.
+'   - Нормализует и проверяет временную колонку.
+'   - Возвращает защиту листа и включает события обратно.
+' Параметры:
+'   ws - лист MRS, в котором произошло изменение.
+'   Target - диапазон изменённых ячеек.
+' Эффект выполнения:
+'   Поддерживает чистый ввод данных и актуальное цветовое оформление строк на листе MRS.
 Public Sub HandleMRSSheetChange(ByVal ws As Worksheet, ByVal Target As Range)
     On Error GoTo SafeExit
     If ws Is Nothing Then Exit Sub
@@ -1611,10 +2528,27 @@ NextMrsTimeCell:
     End If
 
 SafeExit:
+    ' Тот же quiet-cleanup, что и у истории:
+    ' на выходе лист просто возвращается в защищённое состояние.
     ProtectSheetQuiet ws
     Application.EnableEvents = True
 End Sub
 
+' ===========================================================================
+' ProtectSheetQuiet
+' ===========================================================================
+' Назначение:
+'   Тихо возвращает защиту одного листа в cleanup-блоках.
+'   Процедура нужна там, где повторный сбой при `Protect` не должен ломать
+'   основной сценарий завершения и подменять уже сохранённую ошибку.
+' Основные действия:
+'   - Проверяет, передан ли объект листа.
+'   - Пытается включить для него стандартный режим защиты.
+'   - Локально гасит возможную ошибку только внутри helper-процедуры.
+' Параметры:
+'   ws - лист, для которого нужно восстановить защиту.
+' Эффект выполнения:
+'   Лист по возможности возвращается в защищённое состояние без влияния на внешний обработчик ошибок.
 Private Sub ProtectSheetQuiet(ByVal ws As Worksheet)
     On Error Resume Next
     If Not ws Is Nothing Then
@@ -1623,6 +2557,23 @@ Private Sub ProtectSheetQuiet(ByVal ws As Worksheet)
     On Error GoTo 0
 End Sub
 
+' ===========================================================================
+' ProtectWorkbookQuiet
+' ===========================================================================
+' Назначение:
+'   Тихо возвращает структурную защиту книги.
+'   Используется в сценариях импорта MRS, где защита книги временно снимается
+'   и затем должна быть восстановлена без вложенных обработчиков ошибок.
+' Основные действия:
+'   - Проверяет наличие объекта книги.
+'   - Вызывает `Workbook.Protect` с переданными флагами структуры и окон.
+'   - Изолирует возможную ошибку внутри процедуры.
+' Параметры:
+'   wb - книга, для которой нужно включить защиту.
+'   protectStructure - признак защиты структуры книги.
+'   protectWindows - признак защиты окон книги.
+' Эффект выполнения:
+'   Книга по возможности возвращается в защищённое состояние без срыва cleanup-логики.
 Private Sub ProtectWorkbookQuiet(ByVal wb As Workbook, ByVal protectStructure As Boolean, ByVal protectWindows As Boolean)
     On Error Resume Next
     If Not wb Is Nothing Then
@@ -1631,6 +2582,21 @@ Private Sub ProtectWorkbookQuiet(ByVal wb As Workbook, ByVal protectStructure As
     On Error GoTo 0
 End Sub
 
+' ===========================================================================
+' CloseWorkbookQuiet
+' ===========================================================================
+' Назначение:
+'   Безопасно закрывает временно открытую книгу-источник.
+'   Helper нужен в cleanup-блоках импорта, где книга могла быть не открыта
+'   или уже закрыта к моменту завершения процедуры.
+' Основные действия:
+'   - Проверяет наличие объекта книги.
+'   - Пытается закрыть её без сохранения.
+'   - Не даёт вторичной ошибке прервать основную ветку cleanup.
+' Параметры:
+'   wb - временная книга, которую нужно закрыть.
+' Эффект выполнения:
+'   Временный workbook по возможности освобождается без вмешательства во внешний сценарий ошибок.
 Private Sub CloseWorkbookQuiet(ByVal wb As Workbook)
     On Error Resume Next
     If Not wb Is Nothing Then
@@ -1639,6 +2605,21 @@ Private Sub CloseWorkbookQuiet(ByVal wb As Workbook)
     On Error GoTo 0
 End Sub
 
+' ===========================================================================
+' MergeRangeQuiet
+' ===========================================================================
+' Назначение:
+'   Выполняет объединение диапазона без переназначения внешнего error handler.
+'   Нужен для служебных областей, где `Merge` может вызвать исключение, если
+'   диапазон уже приведён к нужному состоянию предыдущим запуском.
+' Основные действия:
+'   - Проверяет наличие диапазона.
+'   - Пытается выполнить `Merge`.
+'   - Завершает локальный тихий блок обработки ошибок.
+' Параметры:
+'   targetRange - диапазон, который требуется объединить.
+' Эффект выполнения:
+'   Диапазон по возможности объединяется, не меняя логику внешнего cleanup/exception flow.
 Private Sub MergeRangeQuiet(ByVal targetRange As Range)
     On Error Resume Next
     If Not targetRange Is Nothing Then
@@ -1647,6 +2628,23 @@ Private Sub MergeRangeQuiet(ByVal targetRange As Range)
     On Error GoTo 0
 End Sub
 
+' ===========================================================================
+' RestorePauseInputCellQuiet
+' ===========================================================================
+' Назначение:
+'   Тихо восстанавливает редактируемое состояние ячейки паузы на листе ввода.
+'   Используется в финальной части расчёта, где cleanup обязан вернуть ячейку
+'   в рабочее состояние даже после аварийного выхода из основной процедуры.
+' Основные действия:
+'   - Проверяет наличие листа ввода.
+'   - Снимает блокировку с ячейки `N4`.
+'   - Применяет к ней текущий стиль редактируемого поля.
+' Параметры:
+'   wsIn - лист ввода.
+'   clrEditHasColor - признак пользовательского цвета редактируемых ячеек.
+'   clrEditable - цвет редактируемой ячейки.
+' Эффект выполнения:
+'   Поле паузы возвращается в доступное состояние без риска сорвать cleanup новой ошибкой.
 Private Sub RestorePauseInputCellQuiet(ByVal wsIn As Worksheet, ByVal clrEditHasColor As Boolean, ByVal clrEditable As Long)
     On Error Resume Next
     If Not wsIn Is Nothing Then
@@ -1656,6 +2654,20 @@ Private Sub RestorePauseInputCellQuiet(ByVal wsIn As Worksheet, ByVal clrEditHas
     On Error GoTo 0
 End Sub
 
+' ===========================================================================
+' DigitsOnly
+' ===========================================================================
+' Назначение:
+'   Извлекает из строки только цифры.
+'   Это один из самых базовых helper-ов модуля, используемый в нормализации
+'   идентификаторов, целочисленных полей и списков участников.
+' Основные действия:
+'   - Последовательно проходит по всем символам строки.
+'   - Добавляет в результат только символы от `0` до `9`.
+' Параметры:
+'   rawText - исходный текст, который нужно очистить.
+' Возвращаемое значение:
+'   Строка, содержащая только цифры из исходного значения.
 Public Function DigitsOnly(ByVal rawText As String) As String
     Dim i As Long
     Dim ch As String
@@ -1668,6 +2680,21 @@ Public Function DigitsOnly(ByVal rawText As String) As String
     Next i
 End Function
 
+' ===========================================================================
+' AppendParticipantsRun
+' ===========================================================================
+' Назначение:
+'   Добавляет в итоговую строку один диапазон выбранных участников.
+'   Используется при обратной сборке нормализованного списка работников из булевого массива.
+' Основные действия:
+'   - Формирует токен либо одиночного номера, либо диапазона `start-end`.
+'   - Добавляет его в результирующую строку через запятую.
+' Параметры:
+'   result - строка-накопитель результата.
+'   startNum - первый номер диапазона.
+'   endNum - последний номер диапазона.
+' Эффект выполнения:
+'   В строку спецификации добавляется ещё один компактный блок выбора участников.
 Private Sub AppendParticipantsRun(ByRef result As String, ByVal startNum As Long, ByVal endNum As Long)
     Dim token As String
 
@@ -1681,6 +2708,23 @@ Private Sub AppendParticipantsRun(ByRef result As String, ByVal startNum As Long
     result = result & token
 End Sub
 
+' ===========================================================================
+' NormalizeParticipantsSpec
+' ===========================================================================
+' Назначение:
+'   Приводит список участников операции к каноническому строковому формату.
+'   Поддерживает одиночные номера и диапазоны, например `1,2,4-6`, и удаляет
+'   некорректные варианты ввода.
+' Основные действия:
+'   - Очищает строку от пробелов и альтернативных разделителей.
+'   - Проверяет синтаксис чисел и диапазонов.
+'   - Строит внутренний булев массив выбранных работников.
+'   - Собирает результат обратно в компактную нормализованную запись.
+' Параметры:
+'   rawText - исходный пользовательский список участников.
+'   maxWorkerCount - максимальное допустимое число работников.
+' Возвращаемое значение:
+'   Нормализованная строка выбора участников либо пустая строка при ошибке или пустом списке.
 Public Function NormalizeParticipantsSpec(ByVal rawText As String, ByVal maxWorkerCount As Long) As String
     Dim spec As String
     Dim i As Long
@@ -1802,6 +2846,21 @@ InvalidSpec:
     NormalizeParticipantsSpec = ""
 End Function
 
+' ===========================================================================
+' SanitizeParticipantsCell
+' ===========================================================================
+' Назначение:
+'   Применяет нормализацию списка участников прямо к ячейке Excel.
+'   Используется в строках операций на листе ввода.
+' Основные действия:
+'   - Читает список участников из ячейки.
+'   - Прогоняет его через `NormalizeParticipantsSpec`.
+'   - Записывает нормализованную строку обратно или очищает ячейку.
+' Параметры:
+'   targetCell - ячейка со спецификацией участников.
+'   maxWorkerCount - максимальное количество допустимых работников.
+' Эффект выполнения:
+'   Ячейка получает компактный и синтаксически корректный список участников.
 Public Sub SanitizeParticipantsCell(ByVal targetCell As Range, ByVal maxWorkerCount As Long)
     Dim normalized As String
 
@@ -1816,6 +2875,21 @@ Public Sub SanitizeParticipantsCell(ByVal targetCell As Range, ByVal maxWorkerCo
     End If
 End Sub
 
+' ===========================================================================
+' TimeValueDefault
+' ===========================================================================
+' Назначение:
+'   Безопасно извлекает временную часть из произвольного значения.
+'   Если значение нельзя интерпретировать как время, функция возвращает запасной вариант.
+' Основные действия:
+'   - Проверяет числовой формат Excel.
+'   - Пытается распознать дату/время или текстовое время.
+'   - При ошибке возвращает `Fallback`.
+' Параметры:
+'   raw - исходное значение из ячейки или параметра.
+'   Fallback - запасное время по умолчанию.
+' Возвращаемое значение:
+'   Корректное значение времени Excel.
 Private Function TimeValueDefault(ByVal raw As Variant, ByVal Fallback As Date) As Date
     On Error GoTo Fallback
     If IsNumeric(raw) Then
@@ -1830,6 +2904,17 @@ Fallback:
     TimeValueDefault = Fallback
 End Function
 
+' ===========================================================================
+' ConvertDurationToDays
+' ===========================================================================
+' Назначение:
+'   Переводит длительность из минут или часов в долю суток Excel.
+'   Внутри расчётов модуля это базовый формат для сложения дат и времени.
+' Параметры:
+'   valueNum - длительность в исходных единицах.
+'   unitName - нормализованное имя единицы измерения.
+' Возвращаемое значение:
+'   Длительность в формате доли суток Excel.
 Private Function ConvertDurationToDays(ByVal valueNum As Double, ByVal unitName As String) As Double
     If unitName = "hour" Then
         ConvertDurationToDays = valueNum / 24#
@@ -1838,6 +2923,20 @@ Private Function ConvertDurationToDays(ByVal valueNum As Double, ByVal unitName 
     End If
 End Function
 
+' ===========================================================================
+' NormalizeUnit
+' ===========================================================================
+' Назначение:
+'   Приводит текст единицы измерения к внутреннему стандарту модуля.
+'   Это нужно, чтобы расчёты не зависели от разных вариантов написания часов и минут.
+' Основные действия:
+'   - Переводит текст в нижний регистр.
+'   - Сводит варианты записи часа к значению `hour`.
+'   - Все остальные случаи трактует как минуты.
+' Параметры:
+'   rawUnit - исходный текст единицы измерения.
+' Возвращаемое значение:
+'   Каноническое имя единицы измерения: `hour` или `min`.
 Private Function NormalizeUnit(ByVal rawUnit As Variant) As String
     Dim unitName As String
     unitName = LCase$(Trim$(CStr(rawUnit)))
@@ -1848,6 +2947,27 @@ Private Function NormalizeUnit(ByVal rawUnit As Variant) As String
     End If
 End Function
 
+' ===========================================================================
+' ParseLunchParams
+' ===========================================================================
+' Назначение:
+'   Подготавливает параметры обеденного перерыва к расчётам времени.
+'   На выходе процедура даёт уже нормализованные значения времени начала обеда,
+'   наличие второго интервала и длительность в долях суток.
+' Основные действия:
+'   - Преобразует сырые значения времени в Excel Time.
+'   - Ограничивает длительность разумными рамками.
+'   - Вычисляет числовое значение длительности в долях суток.
+' Параметры:
+'   lunch1Raw - исходное значение первого обеденного интервала.
+'   lunch2Raw - исходное значение второго обеденного интервала.
+'   lunchDurMin - длительность обеда в минутах; при выходе может быть скорректирована.
+'   lunch1 - сюда возвращается нормализованное время первого интервала.
+'   lunch2 - сюда возвращается нормализованное время второго интервала.
+'   hasLunch2 - флаг наличия второго интервала.
+'   lunchDurDays - сюда возвращается длительность в долях суток.
+' Эффект выполнения:
+'   Процедура заполняет подготовленные значения для всех последующих расчётных helper-функций.
 Private Sub ParseLunchParams( _
     ByVal lunch1Raw As Variant, _
     ByVal lunch2Raw As Variant, _
@@ -1865,6 +2985,28 @@ Private Sub ParseLunchParams( _
     lunchDurDays = lunchDurMin / 1440#
 End Sub
 
+' ===========================================================================
+' ComputeEndWithLunch
+' ===========================================================================
+' Назначение:
+'   Вычисляет время окончания операции с учётом возможного пересечения обеда.
+'   Если операция пересекает обеденный интервал, конец сдвигается на длительность
+'   перерыва, а вызывающий код получает отметку о факте такого пересечения.
+' Основные действия:
+'   - Вычисляет базовое окончание без учёта обеда.
+'   - Проверяет пересечение первого обеденного интервала.
+'   - При наличии второго интервала отдельно проверяет и его.
+'   - При пересечении добавляет длительность обеда к окончанию.
+' Параметры:
+'   opStart - время начала операции.
+'   durationDays - длительность операции в долях суток.
+'   lunch1 - начало первого обеденного интервала.
+'   lunch2 - начало второго обеденного интервала.
+'   hasLunch2 - флаг наличия второго интервала.
+'   lunchDurDays - длительность обеда в долях суток.
+'   crossedLunch - выходной флаг, показывающий факт пересечения обеда.
+' Возвращаемое значение:
+'   Время окончания операции с учётом сдвига из-за обеда.
 Private Function ComputeEndWithLunch( _
     ByVal opStart As Date, _
     ByVal durationDays As Double, _
@@ -1907,6 +3049,24 @@ Private Function ComputeEndWithLunch( _
     ComputeEndWithLunch = opEnd
 End Function
 
+' ===========================================================================
+' ShiftStartOutOfLunch
+' ===========================================================================
+' Назначение:
+'   Сдвигает старт операции, если он попал внутрь обеденного интервала.
+'   Нужна для того, чтобы расчёт не начинал новую операцию посреди перерыва.
+' Основные действия:
+'   - Проверяет попадание времени начала в первый обеденный интервал.
+'   - При наличии второго интервала делает аналогичную проверку и для него.
+'   - Если старт попал внутрь обеда, возвращает конец соответствующего интервала.
+' Параметры:
+'   startDateTime - исходное расчётное время начала.
+'   lunch1 - начало первого обеденного интервала.
+'   lunch2 - начало второго обеденного интервала.
+'   hasLunch2 - флаг наличия второго интервала.
+'   lunchDurDays - длительность обеда в долях суток.
+' Возвращаемое значение:
+'   Скорректированное время старта, не попадающее внутрь обеда.
 Private Function ShiftStartOutOfLunch( _
     ByVal startDateTime As Date, _
     ByVal lunch1 As Date, _
@@ -1943,6 +3103,24 @@ Private Function ShiftStartOutOfLunch( _
     ShiftStartOutOfLunch = st
 End Function
 
+' ===========================================================================
+' BuildLunchShiftFormulaStr
+' ===========================================================================
+' Назначение:
+'   Собирает Excel-формулу для сдвига старта операции за пределы обеда.
+'   Формула нужна в истории, где часть расчётов должна жить не в VBA, а прямо в ячейках Excel.
+' Основные действия:
+'   - Строит условие для первого обеденного интервала.
+'   - При наличии второго интервала добавляет и второе условие.
+'   - Возвращает выражение, которое либо оставляет исходное время, либо переносит его
+'     на конец соответствующего интервала.
+' Параметры:
+'   rawTimeExpr - выражение Excel для исходного времени.
+'   lunch1 - начало первого обеда.
+'   lunch2 - начало второго обеда.
+'   lunchDurMin - длительность обеда в минутах.
+' Возвращаемое значение:
+'   Текст Excel-формулы, корректирующей стартовое время.
 Private Function BuildLunchShiftFormulaStr(ByVal rawTimeExpr As String, _
     ByVal lunch1 As Date, ByVal lunch2 As Date, ByVal lunchDurMin As Double) As String
 
@@ -1990,6 +3168,30 @@ Private Function BuildLunchShiftFormulaStr(ByVal rawTimeExpr As String, _
     End If
 End Function
 
+' ===========================================================================
+' BuildEndFormulasStr
+' ===========================================================================
+' Назначение:
+'   Генерирует Excel-формулы для даты и времени окончания операции.
+'   Процедура нужна для листа истории, где вычисление конца операции должно
+'   оставаться живым и пересчитываемым прямо в ячейках.
+' Основные действия:
+'   - Собирает общую математическую часть формулы из старта, длительности и поправок на обед.
+'   - Добавляет логику первого обеденного интервала.
+'   - При наличии второго интервала расширяет формулу и для него.
+'   - Возвращает две отдельные формулы: для даты и для времени.
+' Параметры:
+'   startDateExpr - выражение Excel для даты начала.
+'   startTimeExpr - выражение Excel для времени начала.
+'   durExpr - выражение Excel для длительности.
+'   unitDiv - делитель перевода длительности в долю суток.
+'   lunch1 - начало первого обеденного интервала.
+'   lunch2 - начало второго обеденного интервала.
+'   lunchDurMin - длительность обеда в минутах.
+'   outEndDateFormula - сюда возвращается формула даты окончания.
+'   outEndTimeFormula - сюда возвращается формула времени окончания.
+' Эффект выполнения:
+'   Процедура подготавливает две строковые формулы для записи в ячейки истории.
 Private Sub BuildEndFormulasStr(ByVal startDateExpr As String, ByVal startTimeExpr As String, _
     ByVal durExpr As String, ByVal unitDiv As String, _
     ByVal lunch1 As Date, ByVal lunch2 As Date, ByVal lunchDurMin As Double, _
@@ -2050,6 +3252,27 @@ Private Sub BuildEndFormulasStr(ByVal startDateExpr As String, ByVal startTimeEx
     End If
 End Sub
 
+' ===========================================================================
+' BuildLunchIconFormulaStr
+' ===========================================================================
+' Назначение:
+'   Собирает Excel-формулу для индикатора пересечения обеда.
+'   Эта формула позже записывается в ячейки истории и возвращает визуальную метку,
+'   если операция была сдвинута обедом или пересекла обеденный интервал.
+' Основные действия:
+'   - Формирует текстовые выражения для первого интервала обеда.
+'   - При наличии второго интервала добавляет в формулу и его.
+'   - Возвращает готовую строку `IF(...)` для вставки в ячейку Excel.
+' Параметры:
+'   startTimeExpr - выражение Excel для времени начала.
+'   durExpr - выражение Excel для длительности.
+'   unitDiv - делитель, переводящий длительность в долю суток.
+'   lunch1 - начало первого обеда.
+'   lunch2 - начало второго обеда.
+'   lunchDurMin - длительность обеда в минутах.
+'   daStr - текстовая метка, возвращаемая формулой при совпадении условия.
+' Возвращаемое значение:
+'   Готовая строка Excel-формулы для индикатора обеда.
 Private Function BuildLunchIconFormulaStr(ByVal startTimeExpr As String, ByVal durExpr As String, ByVal unitDiv As String, _
     ByVal lunch1 As Date, ByVal lunch2 As Date, ByVal lunchDurMin As Double, ByVal daStr As String) As String
 
@@ -2114,10 +3337,35 @@ Private Function BuildLunchIconFormulaStr(ByVal startTimeExpr As String, ByVal d
     End If
 End Function
 
+' ===========================================================================
+' TimePart
+' ===========================================================================
+' Назначение:
+'   Возвращает только временную часть значения Date.
+'   Это небольшой helper для построения расчётов по времени внутри суток.
+' Параметры:
+'   dateTimeValue - дата и время Excel.
+' Возвращаемое значение:
+'   Дробная часть числа даты, соответствующая времени.
 Private Function TimePart(ByVal dateTimeValue As Date) As Double
     TimePart = CDbl(dateTimeValue) - Fix(CDbl(dateTimeValue))
 End Function
 
+' ===========================================================================
+' IsWorkerSelected
+' ===========================================================================
+' Назначение:
+'   Проверяет, входит ли конкретный работник в строковую спецификацию участников.
+'   Если спецификация пуста, функция трактует это как выбор всех работников.
+' Основные действия:
+'   - Разбирает список по запятым.
+'   - Поддерживает одиночные номера и диапазоны вида `3-5`.
+'   - Возвращает истину при первом совпадении.
+' Параметры:
+'   spec - спецификация участников операции.
+'   workerIndex - номер проверяемого работника.
+' Возвращаемое значение:
+'   True, если работник входит в выбор; иначе False.
 Private Function IsWorkerSelected(ByVal spec As String, ByVal workerIndex As Long) As Boolean
     spec = Replace(spec, " ", "")
     If spec = "" Then
@@ -2164,6 +3412,22 @@ ContinueToken:
     IsWorkerSelected = False
 End Function
 
+' ===========================================================================
+' JoinOperationNames
+' ===========================================================================
+' Назначение:
+'   Собирает уникальные названия операций из листа результата в одну строку.
+'   Используется для текстового блока Z7, где нужен компактный перечень работ.
+' Основные действия:
+'   - Проходит по строкам результата в указанном диапазоне.
+'   - Сохраняет только уникальные имена операций.
+'   - Объединяет их через запятую.
+' Параметры:
+'   wsOut - лист результата.
+'   firstRow - первая строка диапазона операций.
+'   lastRow - последняя строка диапазона операций.
+' Возвращаемое значение:
+'   Строка с перечнем уникальных операций.
 Private Function JoinOperationNames(ByVal wsOut As Worksheet, ByVal firstRow As Long, ByVal lastRow As Long) As String
     Dim dict As Object
     Set dict = CreateObject("Scripting.Dictionary")
@@ -2184,6 +3448,39 @@ Private Function JoinOperationNames(ByVal wsOut As Worksheet, ByVal firstRow As 
     End If
 End Function
 
+' ===========================================================================
+' AppendResultToHistory
+' ===========================================================================
+' Назначение:
+'   Переносит свежесформированный расчёт с листа результата на лист истории.
+'   Это один из наиболее важных сценариев модуля: именно здесь временный расчёт
+'   превращается в постоянную запись истории с редактируемыми колонками, формулами,
+'   цветами статуса и дополнительным блоком Z7.
+' Основные действия:
+'   - Находит позицию, куда будет добавлен новый блок истории.
+'   - Создаёт заголовок заказа со статусом и данными о времени формирования.
+'   - Копирует шапку и строки расчёта с листа результата.
+'   - Перестраивает формулы дат, времени начала и окончания уже в контексте истории.
+'   - Назначает форматы, границы, редактируемые поля и правила валидации.
+'   - Добавляет следом текстовый блок Z7.
+'   - Перекрашивает добавленный блок по статусу заказа.
+' Параметры:
+'   wsHist - лист истории, куда добавляется новый блок.
+'   wsOut - лист результата, содержащий свежий расчёт.
+'   wsIn - лист ввода, содержащий номер и имя заказа.
+'   lastDataRow - последняя строка расчётных данных на листе результата.
+'   lastZ7Row - последняя строка текстового блока Z7 на листе результата.
+'   workerCount - количество работников в текущем расчёте.
+'   lunch1 - начало первого обеденного интервала.
+'   lunch2 - начало второго обеденного интервала.
+'   lunchDurMin - длительность обеда в минутах.
+'   primaryIsMin - флаг основной единицы длительности расчёта.
+'   clrEditHasColor - признак пользовательского цвета редактируемых ячеек.
+'   clrEditable - цвет редактируемых ячеек.
+'   clrMrsOrder - цвет подтверждённого заказа.
+'   clrMrsOrderUnconf - цвет неподтверждённого заказа.
+' Эффект выполнения:
+'   На листе истории появляется новый полноформатный блок заказа, готовый к просмотру, правкам и экспорту.
 Private Sub AppendResultToHistory( _
     ByVal wsHist As Worksheet, _
     ByVal wsOut As Worksheet, _
@@ -2201,6 +3498,8 @@ Private Sub AppendResultToHistory( _
         ByVal clrMrsOrderUnconf As Long)
 
     Dim NextRow As Long
+    ' Новый блок истории всегда вставляется после предыдущего,
+    ' а между блоками сохраняется пустая разделительная строка.
     NextRow = wsHist.Cells(wsHist.Rows.Count, 2).End(xlUp).Row + 1
     If NextRow < 4 Then NextRow = 4
 
@@ -2210,6 +3509,8 @@ Private Sub AppendResultToHistory( _
     orderNum = Trim$(CStr(wsIn.Range("B3").Value))
     orderName = Trim$(CStr(wsIn.Range("B4").Value))
     
+    ' Верхняя строка блока хранит статус заказа, номер и краткое описание,
+    ' чтобы в истории можно было быстро отличать один расчёт от другого.
     wsHist.Range(wsHist.Cells(NextRow, 2), wsHist.Cells(NextRow, 4)).Merge
     wsHist.Cells(NextRow, 2).Value = UW(1053, 1045, 32, 1055, 1086, 1076, 1090, 1074, 1077, 1088, 1078, 1076, 1077, 1085, 1086)
     With wsHist.Cells(NextRow, 2).Validation
@@ -2239,6 +3540,8 @@ Private Sub AppendResultToHistory( _
     wsHist.Range(wsHist.Cells(NextRow, 2), wsHist.Cells(NextRow, 22)).Font.Color = GetContrastColor(clrMrsOrderUnconf)
     NextRow = NextRow + 1
 
+    ' Далее копируем шапку результата и все расчётные строки,
+    ' а уже потом поверх них перестраиваем формулы под контекст листа истории.
     wsOut.Range("A1:V1").Copy Destination:=wsHist.Cells(NextRow, 1)
     NextRow = NextRow + 1
     Dim dataStartRow As Long, dataEndRow As Long
@@ -2252,6 +3555,8 @@ Private Sub AppendResultToHistory( _
         wsHist.Range("O" & (dataStartRow + 1) & ":O" & dataEndRow).Formula = "=$O$" & dataStartRow
     End If
 
+    ' Ищем конец предыдущего блока истории, чтобы новый блок мог
+    ' корректно продолжить общую временную цепочку заказов.
     Dim prevDataEndRow As Long, scanRow As Long
     prevDataEndRow = 0
     For scanRow = dataStartRow - 1 To 4 Step -1
@@ -2284,6 +3589,8 @@ Private Sub AppendResultToHistory( _
         lDivisor = "24"
     End If
 
+    ' Старт и конец каждой строки истории задаются уже формулами,
+    ' чтобы при ручной корректировке пауз и длительностей блок пересчитывался автоматически.
     Dim rr As Long
     For rr = dataStartRow To dataEndRow
         If rr > dataStartRow Then
@@ -2328,6 +3635,8 @@ Private Sub AppendResultToHistory( _
     NextRow = NextRow + (lastDataRow - 1) + 1
 
     Dim z7Start As Long
+    ' Текстовое резюме Z7 переносится в историю отдельным подблоком,
+    ' чтобы его можно было читать рядом с соответствующим расчётом.
     z7Start = NextRow
     wsHist.Cells(NextRow, 2).Value = "Z7"
     wsHist.Cells(NextRow + 1, 2).Resize(5, 1).Value = wsOut.Range("B" & (lastZ7Row - 4) & ":B" & lastZ7Row).Value
@@ -2342,6 +3651,8 @@ Private Sub AppendResultToHistory( _
     Next zhr
 
     Dim editCol As Variant, ec As Long
+    ' После копирования возвращаем редактируемость только тем колонкам,
+    ' которые допускают ручную корректировку в истории.
     editCol = Array(5, 7, 12, 16)
     For ec = LBound(editCol) To UBound(editCol)
         For rr = dataStartRow To dataEndRow
@@ -2437,6 +3748,17 @@ SkipCell:
     wsHist.Columns("V:V").ColumnWidth = 8
 End Sub
 
+' ===========================================================================
+' IsNumericOrder
+' ===========================================================================
+' Назначение:
+'   Проверяет, можно ли считать строку корректным числовым номером заказа.
+'   Используется при фильтрации входных данных MRS, чтобы отбросить строки,
+'   которые не похожи на реальные номера заказов.
+' Параметры:
+'   s - строка-кандидат на номер заказа.
+' Возвращаемое значение:
+'   True, если строка состоит только из цифр; иначе False.
 Private Function IsNumericOrder(ByVal s As String) As Boolean
     Dim ch As Long
     If Len(s) = 0 Then IsNumericOrder = False: Exit Function
@@ -2448,6 +3770,25 @@ Private Function IsNumericOrder(ByVal s As String) As Boolean
     IsNumericOrder = True
 End Function
 
+' ===========================================================================
+' LoadMRS
+' ===========================================================================
+' Назначение:
+'   Загружает внешний Excel-файл с данными MRS и раскладывает его в рабочий лист книги.
+'   Это один из самых крупных сценариев модуля: он отвечает и за чтение источника,
+'   и за фильтрацию записей, и за их группировку по датам, заказам и бригадам.
+' Основные действия:
+'   - Очищает текущий лист MRS и подготавливает цветовые настройки книги.
+'   - Запрашивает у пользователя исходный файл и открывает его в режиме ReadOnly.
+'   - Считывает исходный диапазон в массив для ускоренной обработки.
+'   - Отфильтровывает валидные строки заказов и раскладывает их по служебным массивам.
+'   - Собирает набор дат, при необходимости показывает диалог выбора дат.
+'   - Группирует строки по бригадам и заказам, при необходимости показывает диалог выбора бригад.
+'   - Записывает результат на лист MRS, оформляет заголовки, строки данных и цвета.
+' Параметры:
+'   Процедура не принимает аргументов и работает с активной книгой как с контекстом.
+' Эффект выполнения:
+'   Лист "Парсинг MRS" полностью перестраивается на основе выбранного внешнего файла.
 Public Sub LoadMRS()
     If Not ZQ() Then
         MsgBox UW(1054, 1096, 1080, 1073, 1082, 1072, 33), vbCritical
@@ -2474,6 +3815,8 @@ Public Sub LoadMRS()
     Dim wsIn As Worksheet
     Set wsIn = ThisWorkbook.Worksheets(2)
     stage = "Ensure color settings"
+    ' Цвета и параметры обеда нужны и для оформления MRS,
+    ' и для расчётных формул, которые будут строиться в импортируемых блоках.
     wsIn.Unprotect UW(49, 49, 52, 55, 48, 57)
     EnsureColorSettings wsIn
     Dim clrLocked As Long
@@ -2485,7 +3828,7 @@ Public Sub LoadMRS()
     
     Dim lunch1 As Date, lunch2 As Date, hasLunch2 As Boolean, lunchDurDays As Double
     Dim lunchDurMin As Double
-    lunchDurMin = Val(Replace(CStr(wsIn.Range("B12").Value), ",", "."))
+    lunchDurMin = val(Replace(CStr(wsIn.Range("B12").Value), ",", "."))
     ParseLunchParams wsIn.Range("B10").Value, wsIn.Range("B11").Value, lunchDurMin, lunch1, lunch2, hasLunch2, lunchDurDays
 
    wsIn.Protect Chr(49) & Chr(49) & Chr(52) & Chr(55) & Chr(48) & Chr(57)
@@ -2522,6 +3865,8 @@ Public Sub LoadMRS()
     totalRows = UBound(data, 1) - 1
 
     stage = "Parse source rows"
+    ' Исходный файл сначала раскладывается в массивы.
+    ' Это заметно быстрее, чем читать и преобразовывать каждую ячейку напрямую на листе.
     Dim i As Long
     Dim arrOrder() As String, arrOp() As String
     Dim arrWName() As String, arrWID() As String
@@ -2614,6 +3959,8 @@ NextRow:
     End If
 
     stage = "Collect unique dates"
+    ' Отдельно собираем список дат из исходника,
+    ' чтобы пользователь мог ограничить импорт только нужными днями.
     Dim dictDates As Object
     Set dictDates = CreateObject("Scripting.Dictionary")
     For i = 1 To totalRows
@@ -2637,6 +3984,8 @@ NextRow:
     If dateCount > 1 Then QuickSortLong dateKeys, 1, dateCount
 
     stage = "Prompt for dates"
+    ' При наличии нескольких дат показываем множественный выбор,
+    ' чтобы не тащить в лист MRS лишние блоки.
     If dateCount > 1 Then
         Dim dlgDate As Object
         Set dlgDate = ThisWorkbook.DialogSheets.Add
@@ -2688,7 +4037,7 @@ NextRow:
         
         If dlgDateResult Then
             For dIdx = 1 To dateCount
-                If lbDate.Selected(dIdx) Then
+                If lbDate.selected(dIdx) Then
                     anyDateSel = True
                     newDateCount = newDateCount + 1
                     newDateKeys(newDateCount) = dateKeys(dIdx)
@@ -2720,6 +4069,8 @@ NextRow:
     outRow = 3
 
     Dim d As Long
+    ' Каждая выбранная дата формирует свой верхнеуровневый блок:
+    ' дата, затем бригады внутри даты, затем отдельные заказы внутри бригад.
     For d = 1 To dateCount
         Dim curDateKey As Long
         curDateKey = dateKeys(d)
@@ -2739,6 +4090,8 @@ NextRow:
         wsMRS.Rows(outRow).RowHeight = 40
 
         stage = "Build order-worker map for date " & CStr(d)
+        ' Сначала строим связи "заказ -> состав работников" и запоминаем
+        ' самое раннее время старта заказа, чтобы дальше правильно группировать и сортировать блоки.
         Dim dictOrderW As Object
         Set dictOrderW = CreateObject("Scripting.Dictionary")
         Dim dictOrderTime As Object
@@ -2765,6 +4118,8 @@ SkipDateRow:
         Next i
 
     stage = "Build brigade keys for date " & CStr(d)
+    ' Заказы с одинаковым набором исполнителей сворачиваются в одну бригаду.
+    ' Ключ бригады строится как отсортированный список табельных номеров.
     Dim dictOrdBrigKey As Object
     Set dictOrdBrigKey = CreateObject("Scripting.Dictionary")
     Dim key As Variant
@@ -2822,6 +4177,8 @@ SkipDateRow:
     If brigCount > 1 Then QuickSortDoubleString brigTimes, brigKeys, 1, brigCount
 
     stage = "Prompt for brigades date " & CStr(d)
+    ' Если в выбранной дате несколько бригад,
+    ' пользователь может импортировать только нужные составы.
     Dim brigNames() As String
     ReDim brigNames(1 To brigCount)
     Dim selBrig() As Boolean
@@ -2896,7 +4253,7 @@ SkipDateRow:
         Dim anySel As Boolean: anySel = False
         If dlgResult Then
             For bDisp = 1 To brigCount
-                If lb.Selected(bDisp) Then
+                If lb.selected(bDisp) Then
                     selBrig(bDisp) = True
                     anySel = True
                 End If
@@ -2969,6 +4326,8 @@ SkipDateRow:
         Dim oi As Long
         Dim pauseCellRow As Long
 
+        ' Внутри бригады заказы выводятся по фактическому времени старта,
+        ' а между ними при необходимости вставляется редактируемая пауза.
         For oi = 1 To ordInBrig
             Dim curOrder As String
             curOrder = ordKeys(oi)
@@ -3256,6 +4615,8 @@ SkipDate:
 
     Dim errMsg As String
 Done:
+    ' Очистка импорта вынесена в единые quiet-helper'ы:
+    ' отдельно закрывается временный источник, затем возвращается защита книги и листа MRS.
     CloseWorkbookQuiet srcWb
     ProtectWorkbookQuiet ThisWorkbook, True, False
     ProtectSheetQuiet wsMRS
@@ -3272,6 +4633,18 @@ EH:
     Resume Done
 End Sub
 
+' ===========================================================================
+' QuickSortLong
+' ===========================================================================
+' Назначение:
+'   Быстро сортирует массив целых чисел по возрастанию.
+'   Используется при обработке дат и других служебных числовых наборов.
+' Параметры:
+'   arr - сортируемый массив Long.
+'   first - левая граница сортировки.
+'   last - правая граница сортировки.
+' Эффект выполнения:
+'   Массив сортируется на месте алгоритмом QuickSort.
 Private Sub QuickSortLong(arr() As Long, ByVal first As Long, ByVal last As Long)
     Dim pivot As Long, temp As Long
     Dim i As Long, j As Long
@@ -3290,6 +4663,19 @@ Private Sub QuickSortLong(arr() As Long, ByVal first As Long, ByVal last As Long
     If i < last Then QuickSortLong arr, i, last
 End Sub
 
+' ===========================================================================
+' QuickSortVariantStrings
+' ===========================================================================
+' Назначение:
+'   Быстро сортирует строковые значения, хранящиеся в Variant-массиве.
+'   Нужна там, где ключи словарей извлекаются как Variant и должны быть
+'   упорядочены перед дальнейшей группировкой.
+' Параметры:
+'   arr - массив строковых значений в Variant-форме.
+'   first - левая граница сортировки.
+'   last - правая граница сортировки.
+' Эффект выполнения:
+'   Массив сортируется на месте алгоритмом QuickSort.
 Private Sub QuickSortVariantStrings(arr As Variant, ByVal first As Long, ByVal last As Long)
     Dim pivot As String, temp As Variant
     Dim i As Long, j As Long
@@ -3308,6 +4694,19 @@ Private Sub QuickSortVariantStrings(arr As Variant, ByVal first As Long, ByVal l
     If i < last Then QuickSortVariantStrings arr, i, last
 End Sub
 
+' ===========================================================================
+' QuickSortDoubleString
+' ===========================================================================
+' Назначение:
+'   Сортирует числовой массив и синхронно переставляет связанный строковый массив.
+'   Применяется там, где время и строковый ключ должны сохранять взаимное соответствие.
+' Параметры:
+'   arrD - массив числовых ключей сортировки.
+'   arrS - связанный строковый массив.
+'   first - левая граница сортировки.
+'   last - правая граница сортировки.
+' Эффект выполнения:
+'   Оба массива переставляются синхронно, сохраняя связь между элементами.
 Private Sub QuickSortDoubleString(arrD() As Double, arrS() As String, ByVal first As Long, ByVal last As Long)
     Dim pivotD As Double, tempD As Double, tempS As String
     Dim i As Long, j As Long
@@ -3327,6 +4726,23 @@ Private Sub QuickSortDoubleString(arrD() As Double, arrS() As String, ByVal firs
     If i < last Then QuickSortDoubleString arrD, arrS, i, last
 End Sub
 
+' ===========================================================================
+' QuickSortIndices
+' ===========================================================================
+' Назначение:
+'   Сортирует массив индексов по составному набору признаков связанных массивов.
+'   Такой подход удобен, когда нужно менять только порядок ссылок на данные,
+'   не переставляя сами массивы с датами, временем и строками.
+' Параметры:
+'   idx - массив индексов, который сортируется.
+'   arrSDate - массив дат старта.
+'   arrSTime - массив времени старта.
+'   arrOp - массив названий или ключей операций.
+'   arrWID - массив идентификаторов работников.
+'   first - левая граница сортировки.
+'   last - правая граница сортировки.
+' Эффект выполнения:
+'   Индексный массив упорядочивается согласно логике `CompareIndices`.
 Private Sub QuickSortIndices(idx() As Long, arrSDate() As Date, arrSTime() As Date, arrOp() As String, arrWID() As String, ByVal first As Long, ByVal last As Long)
     Dim pivotValA As Double, pivotValB As String, pivotValC As String
     Dim i As Long, j As Long, temp As Long
@@ -3349,6 +4765,24 @@ Private Sub QuickSortIndices(idx() As Long, arrSDate() As Date, arrSTime() As Da
     If i < last Then QuickSortIndices idx, arrSDate, arrSTime, arrOp, arrWID, i, last
 End Sub
 
+' ===========================================================================
+' CompareIndices
+' ===========================================================================
+' Назначение:
+'   Сравнивает одну запись с опорным набором сортировочных значений.
+'   Используется внутри `QuickSortIndices` для составной сортировки по времени,
+'   операции и идентификатору работника.
+' Параметры:
+'   idxA - индекс сравниваемой записи.
+'   pA - опорное числовое значение даты и времени.
+'   pB - опорный строковый ключ операции.
+'   pC - опорный строковый ключ работника.
+'   arrSDate - массив дат старта.
+'   arrSTime - массив времени старта.
+'   arrOp - массив операций.
+'   arrWID - массив идентификаторов работников.
+' Возвращаемое значение:
+'   `-1`, `0` или `1` в зависимости от результата сравнения.
 Private Function CompareIndices(idxA As Long, pA As Double, pB As String, pC As String, _
     arrSDate() As Date, arrSTime() As Date, arrOp() As String, arrWID() As String) As Integer
     Dim vA As Double
@@ -3371,6 +4805,19 @@ Private Function CompareIndices(idxA As Long, pA As Double, pB As String, pC As 
     CompareIndices = 0
 End Function
 
+' ===========================================================================
+' ClearMRS
+' ===========================================================================
+' Назначение:
+'   Полностью очищает лист MRS и возвращает книгу к согласованному состоянию.
+'   Используется перед новым импортом и как отдельная пользовательская команда очистки.
+' Основные действия:
+'   - Проверяет допустимость запуска через внутренний предохранитель.
+'   - Считывает текущие цвета интерфейса.
+'   - Удаляет рабочие строки листа MRS.
+'   - Запускает общую перекраску книги после очистки.
+' Эффект выполнения:
+'   Лист MRS очищается от импортированных данных и остаётся готовым к новому заполнению.
 Public Sub ClearMRS()
     If Not ZQ() Then
         MsgBox UW(1054, 1096, 1080, 1073, 1082, 1072, 33), vbCritical
@@ -3395,6 +4842,8 @@ Public Sub ClearMRS()
     Exit Sub
 
 Cleanup:
+    ' Сброс MRS использует тот же тихий шаблон восстановления защиты,
+    ' что и остальные финальные блоки модуля.
     ProtectSheetQuiet wsIn
     ProtectSheetQuiet wsMRS
     Exit Sub
@@ -3402,6 +4851,17 @@ EH:
     Resume Cleanup
 End Sub
 
+' ===========================================================================
+' ClearMRSArea
+' ===========================================================================
+' Назначение:
+'   Удаляет только рабочую область данных листа MRS.
+'   Верхняя часть листа с шапкой и служебной разметкой при этом сохраняется.
+' Параметры:
+'   wsMRS - лист MRS.
+'   clrLocked - параметр оставлен для единообразия вызова; в текущей реализации напрямую не используется.
+' Эффект выполнения:
+'   Все строки данных MRS, начиная с четвёртой, удаляются.
 Private Sub ClearMRSArea(ByVal wsMRS As Worksheet, ByVal clrLocked As Long)
     Dim lastRow As Long
     lastRow = wsMRS.UsedRange.Row + wsMRS.UsedRange.Rows.Count - 1
@@ -3414,6 +4874,14 @@ Private Sub ClearMRSArea(ByVal wsMRS As Worksheet, ByVal clrLocked As Long)
     End If
 End Sub
 
+' ===========================================================================
+' SelectAllBrigades
+' ===========================================================================
+' Назначение:
+'   Выбирает все элементы списка на активном DialogSheet.
+'   Используется в диалогах выбора дат и бригад при импорте MRS.
+' Эффект выполнения:
+'   Все элементы первого списка на активном диалоговом листе помечаются как выбранные.
 Public Sub SelectAllBrigades()
     On Error Resume Next
     Dim dlg As Object
@@ -3423,11 +4891,19 @@ Public Sub SelectAllBrigades()
         Set lb = dlg.ListBoxes(1)
         Dim i As Long
         For i = 1 To lb.ListCount
-            lb.Selected(i) = True
+            lb.selected(i) = True
         Next i
     End If
 End Sub
 
+' ===========================================================================
+' ClearAllBrigades
+' ===========================================================================
+' Назначение:
+'   Снимает выбор со всех элементов списка на активном DialogSheet.
+'   Является парной процедурой к `SelectAllBrigades`.
+' Эффект выполнения:
+'   Первый список на активном диалоговом листе полностью очищается от выбора.
 Public Sub ClearAllBrigades()
     On Error Resume Next
     Dim dlg As Object
@@ -3437,19 +4913,52 @@ Public Sub ClearAllBrigades()
         Set lb = dlg.ListBoxes(1)
         Dim i As Long
         For i = 1 To lb.ListCount
-            lb.Selected(i) = False
+            lb.selected(i) = False
         Next i
     End If
 End Sub
 
+' ===========================================================================
+' SaveHistorySheet
+' ===========================================================================
+' Назначение:
+'   Пользовательская точка входа для экспорта листа истории.
+' Эффект выполнения:
+'   Передаёт в общую процедуру экспорта лист истории и префикс имени файла.
 Public Sub SaveHistorySheet()
     ExportSheet ThisWorkbook.Worksheets(4), UW(1048, 1089, 1090, 1086, 1088, 1080, 1103, 95, 1056, 1072, 1089, 1095, 1077, 1090, 1086, 1074)
 End Sub
 
+' ===========================================================================
+' SaveMRSSheet
+' ===========================================================================
+' Назначение:
+'   Пользовательская точка входа для экспорта листа MRS.
+' Эффект выполнения:
+'   Передаёт в общую процедуру экспорта лист MRS и префикс имени файла.
 Public Sub SaveMRSSheet()
     ExportSheet ThisWorkbook.Worksheets(5), UW(1055, 1072, 1088, 1089, 1080, 1085, 1075, 95, 77, 82, 83)
 End Sub
 
+' ===========================================================================
+' ExportSheet
+' ===========================================================================
+' Назначение:
+'   Экспортирует выбранный лист в отдельный файл формата xlsx.
+'   Процедура используется и для истории, и для листа MRS, сохраняя текущую
+'   структуру листа, но убирая интерактивные элементы исходной макросной книги.
+' Основные действия:
+'   - Формирует имя файла по умолчанию и показывает диалог Save As.
+'   - Копирует выбранный лист в новую временную книгу.
+'   - Удаляет с экспортируемого листа кнопки и другие shape-объекты.
+'   - Очищает служебную вторую строку.
+'   - Повторно создаёт условное форматирование строк заказов по статусу.
+'   - Сохраняет новую книгу как обычный xlsx и закрывает её.
+' Параметры:
+'   ws - лист, который нужно экспортировать.
+'   defaultNamePrefix - префикс имени файла по умолчанию.
+' Эффект выполнения:
+'   Пользователь получает внешний xlsx-файл, подготовленный к открытию без макросной оболочки.
 Private Sub ExportSheet(ByVal ws As Worksheet, ByVal defaultNamePrefix As String)
     On Error GoTo EH
     Dim savePath As Variant
@@ -3529,1096 +5038,4 @@ EH:
     Resume Cleanup
 End Sub
 
-'@
 
-$inputSheetCode = @'
-Option Explicit
-
-Private mColorSignature As String
-
-Private Sub Worksheet_Activate()
-    mColorSignature = BuildColorSettingsSignature(Me)
-End Sub
-
-Private Sub Worksheet_SelectionChange(ByVal Target As Range)
-    On Error GoTo SafeExit
-
-    Dim currentSignature As String
-    currentSignature = BuildColorSettingsSignature(Me)
-
-    If mColorSignature = "" Then
-        mColorSignature = currentSignature
-    ElseIf StrComp(currentSignature, mColorSignature, vbBinaryCompare) <> 0 Then
-        Application.EnableEvents = False
-        RefreshWorkbookColors
-        mColorSignature = BuildColorSettingsSignature(Me)
-    End If
-
-SafeExit:
-    Application.EnableEvents = True
-End Sub
-
-Private Sub Worksheet_Change(ByVal Target As Range)
-    On Error GoTo SafeExit
-    If Target Is Nothing Then Exit Sub
-
-    Dim participantRange As Range, participantCell As Range
-
-    Application.EnableEvents = False
-    Me.Unprotect Chr(49) & Chr(49) & Chr(52) & Chr(55) & Chr(48) & Chr(57)
-
-    Dim syncOpsFromSelectors As Boolean
-    syncOpsFromSelectors = False
-
-    If Not Intersect(Target, Me.Range("B8")) Is Nothing Then
-        Dim opCount As Long
-        opCount = CLng(Val(Me.Range("B8").Value))
-        If opCount < 1 Then opCount = 1
-        If opCount > 20 Then opCount = 20
-        Me.Range("B8").Value = opCount
-        SyncOperationRows Me, opCount
-    End If
-
-    If Not Intersect(Target, Me.Range("B9")) Is Nothing Then
-        Dim workerCount As Long
-        workerCount = CLng(Val(Me.Range("B9").Value))
-        If workerCount < 1 Then workerCount = 1
-        If workerCount > 10 Then workerCount = 10
-        Me.Range("B9").Value = workerCount
-        SyncWorkerIdInputs Me, workerCount
-
-        Set participantRange = Me.Range("P4:P23")
-    End If
-
-    Dim workerRange As Range, cell As Range
-    Set workerRange = Intersect(Target, Me.Range("E4:E13"))
-    If Not workerRange Is Nothing Then
-        For Each cell In workerRange.Cells
-            SanitizeWorkerIdCell cell
-        Next cell
-    End If
-
-    If Not Intersect(Target, Me.Range("B3")) Is Nothing Then
-        Dim b1digits As String
-        b1digits = DigitsOnly(CStr(Me.Range("B3").Value))
-        If Len(b1digits) > 12 Then b1digits = Left$(b1digits, 12)
-        Me.Range("B3").NumberFormat = "000000000000"
-        If b1digits = "" Then
-            Me.Range("B3").ClearContents
-        Else
-            Me.Range("B3").Value = CDbl(b1digits)
-        End If
-    End If
-
-    Dim hRange As Range, hCell As Range
-    Set hRange = Intersect(Target, Me.Range("H4:H23"))
-    If Not hRange Is Nothing Then
-        For Each hCell In hRange.Cells
-            Dim hDigits As String
-            hDigits = DigitsOnly(CStr(hCell.Value))
-            If Len(hDigits) > 8 Then hDigits = Left$(hDigits, 8)
-            hCell.NumberFormat = "00000000"
-            If hDigits = "" Then
-                hCell.ClearContents
-            Else
-                hCell.Value = CLng(hDigits)
-            End If
-        Next hCell
-    End If
-
-    Dim jRange As Range, jCell As Range
-    Set jRange = Intersect(Target, Me.Range("J4:J23"))
-    If Not jRange Is Nothing Then
-        For Each jCell In jRange.Cells
-            Dim rawJ As String
-            rawJ = CStr(jCell.Value)
-            If InStr(rawJ, ".") > 0 Then
-                rawJ = Replace(rawJ, ".", ",")
-                jCell.Value = rawJ
-            End If
-        Next jCell
-    End If
-
-    Dim kmRange As Range, kmCell As Range
-    Set kmRange = Intersect(Target, Me.Range("K4:K23,N4:N23"))
-    If Not kmRange Is Nothing Then
-        For Each kmCell In kmRange.Cells
-            Dim cleanedKM As String
-            cleanedKM = NormalizeDecimal(CStr(kmCell.Value))
-            If cleanedKM = "" Then
-                kmCell.Value = 0
-            Else
-                kmCell.Value = Val(Replace(cleanedKM, ",", "."))
-            End If
-        Next kmCell
-    End If
-
-    If Not Intersect(Target, Me.Range("B16")) Is Nothing Then
-        Me.Range("B16").Value = NormalizeRizInput(CStr(Me.Range("B16").Value))
-    End If
-
-    If Not Intersect(Target, Me.Range("B17")) Is Nothing Then
-        Me.Range("B17").Value = NormalizeKInput(CStr(Me.Range("B17").Value))
-    End If
-
-    Dim inputTimeRange As Range, inputTimeCell As Range
-    Set inputTimeRange = Intersect(Target, Union(Me.Range("B6"), Me.Range("B10:B11")))
-    If Not inputTimeRange Is Nothing Then
-        For Each inputTimeCell In inputTimeRange.Cells
-            SanitizeTimeCell inputTimeCell
-        Next inputTimeCell
-    End If
-
-    If participantRange Is Nothing Then
-        Set participantRange = Intersect(Target, Me.Range("P4:P23"))
-    ElseIf Not Intersect(Target, Me.Range("P4:P23")) Is Nothing Then
-        Set participantRange = Union(participantRange, Intersect(Target, Me.Range("P4:P23")))
-    End If
-
-    If Not participantRange Is Nothing Then
-        Dim maxParticipantWorkerCount As Long
-        maxParticipantWorkerCount = CLng(Val(Me.Range("B9").Value))
-        If maxParticipantWorkerCount < 1 Then maxParticipantWorkerCount = 1
-        If maxParticipantWorkerCount > 10 Then maxParticipantWorkerCount = 10
-
-        participantRange.NumberFormat = "@"
-        For Each participantCell In participantRange.Cells
-            SanitizeParticipantsCell participantCell, maxParticipantWorkerCount
-        Next participantCell
-    End If
-
-    If Not Intersect(Target, Me.Range("L4")) Is Nothing Then
-        syncOpsFromSelectors = True
-    End If
-
-    If Not Intersect(Target, Me.Range("M4")) Is Nothing Then
-        syncOpsFromSelectors = True
-    End If
-
-    If Not Intersect(Target, Me.Range("O4")) Is Nothing Then
-        syncOpsFromSelectors = True
-    End If
-
-    If syncOpsFromSelectors Then
-        Dim currentOpCount As Long
-        currentOpCount = CLng(Val(Me.Range("B8").Value))
-        If currentOpCount < 1 Then currentOpCount = 1
-        If currentOpCount > 20 Then currentOpCount = 20
-        SyncOperationRows Me, currentOpCount
-    End If
-
-SafeExit:
-    mColorSignature = BuildColorSettingsSignature(Me)
-    Me.Protect Chr(49) & Chr(49) & Chr(52) & Chr(55) & Chr(48) & Chr(57)
-    Application.EnableEvents = True
-End Sub
-'@
-
-$historySheetCode = @'
-Option Explicit
-'@
-
-$mrsSheetCode = @'
-Option Explicit
-'@
-
-$notesSheetCode = @'
-Option Explicit
-
-Private Sub Worksheet_Change(ByVal Target As Range)
-    On Error GoTo SafeExit
-    If Target Is Nothing Then Exit Sub
-
-    Dim workerRange As Range
-    Set workerRange = Intersect(Target, Me.Range("B3:B52"))
-    If workerRange Is Nothing Then Exit Sub
-
-    Application.EnableEvents = False
-    Me.Unprotect Chr(49) & Chr(49) & Chr(52) & Chr(55) & Chr(48) & Chr(57)
-
-    Dim cell As Range
-    For Each cell In workerRange.Cells
-        SanitizeWorkerIdCell cell
-    Next cell
-
-SafeExit:
-    Me.Protect Chr(49) & Chr(49) & Chr(52) & Chr(55) & Chr(48) & Chr(57)
-    Application.EnableEvents = True
-End Sub
-'@
-
-$workbookCode = @'
-Private Sub Workbook_Open()
-    Dim wsDisclaimer As Worksheet
-    Dim wsIn As Worksheet
-    Set wsDisclaimer = ThisWorkbook.Worksheets(1)
-    Set wsIn = ThisWorkbook.Worksheets(2)
-    wsIn.Unprotect Chr(49) & Chr(49) & Chr(52) & Chr(55) & Chr(48) & Chr(57)
-    wsIn.Range("B5").Value = Date
-    wsIn.Range("B7").Value = Date
-    wsIn.Protect Chr(49) & Chr(49) & Chr(52) & Chr(55) & Chr(48) & Chr(57)
-    RefreshWorkbookColors
-    wsDisclaimer.Activate
-    wsDisclaimer.Range("B2").Select
-End Sub
-
-Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
-    If Target Is Nothing Then Exit Sub
-    If Not TypeOf Sh Is Worksheet Then Exit Sub
-
-    If Sh Is ThisWorkbook.Worksheets(4) Then
-        HandleHistorySheetChange Sh, Target
-    ElseIf Sh Is ThisWorkbook.Worksheets(5) Then
-        HandleMRSSheetChange Sh, Target
-    End If
-End Sub
-
-Private Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)
-    Dim userInput As String
-    Dim correctPassword As String
-    Dim msg As String
-    Dim promptText As String
-    Dim titleText As String
-
-    correctPassword = UW(49, 48, 53, 51, 53, 53)
-    
-    promptText = UW(1044, 1083, 1103, 32, 1089, 1086, 1093, 1088, 1072, 1085, 1077, 1085, 1080, 1103, 32, 1092, 1072, 1081, 1083, 1072, 32, 1090, 1088, 1077, 1073, 1091, 1077, 1090, 1089, 1103, 32, 1087, 1072, 1088, 1086, 1083, 1100, 32, 1072, 1076, 1084, 1080, 1085, 1080, 1089, 1090, 1088, 1072, 1090, 1086, 1088, 1072, 46) _
-                 & vbCrLf & vbCrLf & _
-                 UW(1042, 1074, 1077, 1076, 1080, 1090, 1077, 32, 1087, 1072, 1088, 1086, 1083, 1100, 58)
-    
-    titleText = UW(1055, 1086, 1076, 1090, 1074, 1077, 1088, 1078, 1076, 1077, 1085, 1080, 1077, 32, 1089, 1086, 1093, 1088, 1072, 1085, 1077, 1085, 1080, 1103)
-    
-    userInput = InputBox(promptText, titleText)
-    
-    If userInput = correctPassword Then
-    Else
-        msg = UW(1058, 1072, 1073, 1077, 1083, 1100, 1085, 1099, 1077, 32, 1085, 1086, 1084, 1077, 1088, 1072, 32, 1087, 1086, 1076, 1087, 1072, 1076, 1072, 1102, 1090, 32, 1087, 1086, 1076, 32, 1079, 1072, 1082, 1086, 1085, 32, 1086, 1073, 32, 1086, 1073, 1088, 1072, 1073, 1086, 1090, 1082, 1077, 32, 1087, 1077, 1088, 1089, 1086, 1085, 1072, 1083, 1100, 1085, 1099, 1093, 32, 1076, 1072, 1085, 1085, 1099, 1093, 44, 32, 1089, 1086, 1093, 1088, 1072, 1085, 1103, 1090, 1100, 47, 1088, 1077, 1076, 1072, 1082, 1090, 1080, 1088, 1086, 1074, 1072, 1090, 1100, 32, 1096, 1072, 1073, 1083, 1086, 1085, 32, 1079, 1072, 1087, 1088, 1077, 1097, 1077, 1085, 1086, 46)
-        
-        MsgBox msg, vbCritical, UW(1044, 1077, 1081, 1089, 1090, 1074, 1080, 1077, 32, 1079, 1072, 1087, 1088, 1077, 1097, 1077, 1085, 1086)
-        Cancel = True
-    End If
-End Sub
-
-'@
-
-$excel = $null
-$wb = $null
-$securityKey = "HKCU:\Software\Microsoft\Office\16.0\Excel\Security"
-$hadSecurityKey = Test-Path $securityKey
-$previousAccessVBOM = $null
-$hadAccessVBOMValue = $false
-$restoreExpected = $null
-
-try {
-    if (-not $hadSecurityKey) {
-        New-Item -Path $securityKey -Force | Out-Null
-    }
-    try {
-        $previousAccessVBOM = (Get-ItemProperty -Path $securityKey -Name AccessVBOM -ErrorAction Stop).AccessVBOM
-        $hadAccessVBOMValue = $true
-    } catch {
-        $hadAccessVBOMValue = $false
-    }
-    New-ItemProperty -Path $securityKey -Name AccessVBOM -Value 1 -PropertyType DWord -Force | Out-Null
-
-    $excel = New-Object -ComObject Excel.Application
-    $excel.Visible = $false
-    $excel.DisplayAlerts = $false
-    $excel.EnableEvents = $false
-
-    $wb = $excel.Workbooks.Add()
-
-    while ($wb.Worksheets.Count -lt 6) {
-        $null = $wb.Worksheets.Add()
-    }
-
-    $wsDisclaimer = $wb.Worksheets.Item(1)
-    $wsDisclaimer.Name = (RU @(1044,1080,1089,1082,1083,1077,1081,1084,1077,1088))
-    $wsInput = $wb.Worksheets.Item(2)
-    $wsInput.Name = (RU @(1042,1074,1086,1076))
-    $wsResult = $wb.Worksheets.Item(3)
-    $wsResult.Name = (RU @(1056,1077,1079,1091,1083,1100,1090,1072,1090))
-    $wsHistory = $wb.Worksheets.Item(4)
-    $wsHistory.Name = (RU @(1048,1089,1090,1086,1088,1080,1103))
-    $wsTechCards = $wb.Worksheets.Item(5)
-    $wsTechCards.Name = (RU @(1055,1072,1088,1089,1080,1085,1075,32,77,82,83))
-    $wsNotes = $wb.Worksheets.Item(6)
-    $wsNotes.Name = (RU @(1044,1083,1103,32,1047,1072,1084,1077,1090,1086,1082))
-
-    # --- Title row ---
-    $wsInput.Range("A1:P1").Merge() | Out-Null
-    $wsInput.Range("A1").Value = (RU @(84,105,109,101,84,111,84,97,98,108,101,45,86,66,65,32,98,121,32,1043,1072,1083,1080,1084,1079,1103,1085,1086,1074,32,1043,46,1056,46))
-    $wsInput.Range("A1").Font.Bold = $true
-    $wsInput.Range("A1").Font.Size = 16
-    $wsInput.Range("A1:P1").HorizontalAlignment = -4108  # xlCenter
-    $wsInput.Range("A1:P1").VerticalAlignment = -4108     # xlCenter
-    $wsInput.Rows(1).RowHeight = 50
-    # --- Separator row: merged A2:P2 ---
-    $wsInput.Range("A2:P2").Merge() | Out-Null
-
-    $wsInput.Range("A3").Value = (RU @(1053,1086,1084,1077,1088,32,1047,1072,1082,1072,1079,1072))
-    $wsInput.Range("A4").Value = (RU @(1053,1072,1080,1084,1077,1085,1086,1074,1072,1085,1080,1077))
-    $wsInput.Range("A5").Value = (RU @(1044,1072,1090,1072,32,1085,1072,1095,1072,1083,1072))
-    $wsInput.Range("A6").Value = (RU @(1042,1088,1077,1084,1103,32,1085,1072,1095,1072,1083,1072))
-    $wsInput.Range("A7").Value = (RU @(1044,1072,1090,1072,32,1087,1088,1086,1074,1086,1076,1082,1080))
-    $wsInput.Range("A8").Value = (RU @(1050,1086,1083,45,1074,1086,32,1086,1087,1077,1088,1072,1094,1080,1081))
-    $wsInput.Range("A9").Value = (RU @(1050,1086,1083,45,1074,1086,32,1080,1089,1087,1086,1083,1085,1080,1090,1077,1083,1077,1081))
-    $wsInput.Range("A10").Value = (RU @(1054,1073,1077,1076,32,49,32,40,1063,1063,58,1052,1052,41))
-    $wsInput.Range("A11").Value = (RU @(1054,1073,1077,1076,32,50,32,40,48,48,58,48,48,32,45,32,1086,1090,1082,1083,46,41))
-    $wsInput.Range("A12").Value = (RU @(1044,1083,1080,1090,1077,1083,1100,1085,1086,1089,1090,1100,32,1086,1073,1077,1076,1072,32,40,1084,1080,1085,41))
-    $wsInput.Range("A13").Value = (RU @(90,55,58,32,1057,1086,1089,1090,1086,1103,1085,1080,1077,32,1076,1086,32,1088,1072,1073,1086,1090))
-    $wsInput.Range("A14").Value = (RU @(90,55,58,32,1044,1086,1087,46,32,1088,1072,1073,1086,1090,1099))
-    $wsInput.Range("A15").Value = (RU @(90,55,58,32,1056,1077,1082,1086,1084,1077,1085,1076,1072,1094,1080,1080))
-    $wsInput.Range("A16").Value = (RU @(90,55,58,32,82,1080,1079,40,1052,1086,1084,41))
-    $wsInput.Range("A17").Value2 = "Z7: K"
-
-    $today = Get-Date
-    $todayOA = [double]$today.ToOADate()
-    $todayDateOnly = [Math]::Floor($todayOA)
-    $wsInput.Range("B5").Value2 = $todayDateOnly
-    $wsInput.Range("B5").NumberFormatLocal = [char]0x0414 + [char]0x0414 + "." + [char]0x041C + [char]0x041C + "." + [char]0x0413 + [char]0x0413 + [char]0x0413 + [char]0x0413
-    $wsInput.Range("B6").Value2 = (8/24)
-    $wsInput.Range("B6").NumberFormatLocal = [char]0x0447 + [char]0x0447 + ":" + [char]0x043C + [char]0x043C + ":" + [char]0x0441 + [char]0x0441
-    $wsInput.Range("B7").Value2 = $todayDateOnly
-    $wsInput.Range("B7").NumberFormatLocal = [char]0x0414 + [char]0x0414 + "." + [char]0x041C + [char]0x041C + "." + [char]0x0413 + [char]0x0413 + [char]0x0413 + [char]0x0413
-    $wsInput.Range("B8").Value2 = 2
-    $wsInput.Range("B9").Value2 = 2
-    $wsInput.Range("B10").Value2 = (12/24)
-    $wsInput.Range("B11").Value2 = 0
-    $wsInput.Range("B10:B11").NumberFormatLocal = [char]0x0447 + [char]0x0447 + ":" + [char]0x043C + [char]0x043C + ":" + [char]0x0441 + [char]0x0441
-    $wsInput.Range("B12").Value2 = 45
-    $wsInput.Range("B13").Value = (RU @(1079,1072,1084,1077,1095,1072,1085,1080,1081,32,1085,1077,1090))
-    $wsInput.Range("B14").Value = (RU @(1085,1077,1090))
-    $wsInput.Range("B15").Value = (RU @(1085,1077,1090))
-    $wsInput.Range("B16").Value2 = ""
-    $wsInput.Range("B17").Value2 = ""
-    $wsInput.Range("B16:B17").NumberFormat = "@"
-
-    $wsInput.Range("D3").Value = (RU @(1048,1089,1087,1086,1083,1085,1080,1090,1077,1083,1100))
-    $wsInput.Range("E3").Value = (RU @(8470))
-    $wsInput.Range("D3:E3").Font.Bold = $true
-
-    $activeWorkerCount = [int]$wsInput.Range("B9").Value2
-    if ($activeWorkerCount -lt 1) { $activeWorkerCount = 1 }
-    if ($activeWorkerCount -gt 10) { $activeWorkerCount = 10 }
-    foreach ($i in 1..10) {
-        $row = 3 + $i
-        $wsInput.Cells.Item($row, 4).Value = ((RU @(1048,1089,1087,1086,1083,1085,1080,1090,1077,1083,1100)) + " " + $i)
-        $wsInput.Cells.Item($row, 5).NumberFormat = "00000000"
-        if ($i -le $activeWorkerCount) {
-            $wsInput.Cells.Item($row, 4).Font.Color = 0
-            $wsInput.Cells.Item($row, 5).Font.Color = 0
-            $wsInput.Cells.Item($row, 5).Interior.Pattern = -4142
-            $wsInput.Cells.Item($row, 5).Borders.LineStyle = 1
-        } else {
-            $wsInput.Cells.Item($row, 4).Font.Color = $lightRed
-            $wsInput.Cells.Item($row, 5).Font.Color = $lightRed
-            $wsInput.Cells.Item($row, 5).Interior.Color = $lightRed
-            $wsInput.Cells.Item($row, 5).Borders.LineStyle = -4142
-        }
-    }
-
-    $wsInput.Range("G3").Value = (RU @(8470))
-    $wsInput.Range("H3").Value = (RU @(1055,1044,1058,1042))
-    $wsInput.Range("I3").Value = (RU @(1054,1087,1077,1088,1072,1094,1080,1103))
-    $wsInput.Range("J3").Value = "-"
-    $wsInput.Range("K3").Value = (RU @(1044,1083,1080,1090,1077,1083,1100,1085,1086,1089,1090,1100))
-    $wsInput.Range("L3").Value = (RU @(1045,1076,1080,1085,1080,1094,1072))
-    $wsInput.Range("M3").Value = (RU @(1058,1080,1087,32,1079,1072,1076,1072,1085,1080,1103))
-    $wsInput.Range("N3").Value = (RU @(1055,1072,1091,1079,1072))
-    $wsInput.Range("O3").Value = (RU @(1045,1076,1080,1085,1080,1094,1072))
-    $wsInput.Range("P3").Value = (RU @(1059,1095,1072,1089,1090,1085,1080,1082,1080))
-    $wsInput.Range("G3:P3").Font.Bold = $true
-
-    $wsInput.Range("G4").Value2 = 1
-    $wsInput.Range("I4").Value = (RU @(1054,1087,1077,1088,1072,1094,1080,1103,32,49))
-    $wsInput.Range("K4").Value2 = 0
-    $wsInput.Range("L4").Value = (RU @(1084,1080,1085))
-    $wsInput.Range("M4").Value = (RU @(1054,1073,1097,1077,1077))
-    $wsInput.Range("O4").Value = (RU @(1084,1080,1085))
-
-    $wsInput.Range("G5").Value2 = 2
-    $wsInput.Range("I5").Value = (RU @(1054,1087,1077,1088,1072,1094,1080,1103,32,50))
-    $wsInput.Range("K5").Value2 = 0
-    $wsInput.Range("L5").Value = (RU @(1084,1080,1085))
-    $wsInput.Range("M5").Value = (RU @(1054,1073,1097,1077,1077))
-    $wsInput.Range("O5").Value = (RU @(1084,1080,1085))
-
-    # Default values: Пауза=0, Участники=пусто for active operations only
-    for ($r = 4; $r -le 5; $r++) {
-        $wsInput.Cells.Item($r, 14).Value2 = 0   # N = Пауза
-        $wsInput.Cells.Item($r, 16).Value2 = ""  # P = Участники
-    }
-
-    # K4:K23, N4:N23: text format for safe input (NormalizeDecimal in VBA)
-    $wsInput.Range("K4:K23").NumberFormat = "@"
-    $wsInput.Range("N4:N23").NumberFormat = "@"
-    $wsInput.Range("P4:P23").NumberFormat = "@"
-
-    $wsInput.Columns("A:A").ColumnWidth = 25
-    $wsInput.Columns("B:B").ColumnWidth = 40
-    $wsInput.Columns("C:C").ColumnWidth = 2
-    $wsInput.Columns("D:D").ColumnWidth = 15
-    $wsInput.Columns("E:E").ColumnWidth = 10
-    $wsInput.Columns("F:F").ColumnWidth = 1
-    $wsInput.Columns("G:G").ColumnWidth = 4
-    $wsInput.Columns("H:H").ColumnWidth = 10
-    $wsInput.Columns("I:I").ColumnWidth = 50
-    $wsInput.Columns("J:J").ColumnWidth = 3
-    $wsInput.Columns("K:K").ColumnWidth = 14
-    $wsInput.Columns("L:L").ColumnWidth = 9
-    $wsInput.Columns("M:M").ColumnWidth = 12
-    $wsInput.Columns("N:N").ColumnWidth = 6
-    $wsInput.Columns("O:O").ColumnWidth = 9
-    $wsInput.Columns("P:P").ColumnWidth = 11
-    $wsInput.Cells.HorizontalAlignment = -4108
-    $wsInput.Cells.VerticalAlignment = -4108
-    $wsInput.Cells.WrapText = $true
-
-    # --- Light red for non-editable area ---
-    $lightRed = 15132415  # RGB(255,230,230) in BGR
-    $wsInput.Cells.Interior.Color = $lightRed
-
-    # --- Disclaimer sheet ---
-    $wsDisclaimer.Cells.Interior.Color = $lightRed
-    $wsDisclaimer.Cells.Locked = $true
-    $wsDisclaimer.Columns("B:B").ColumnWidth = 230
-    $wsDisclaimer.Rows(2).RowHeight = 400
-    $wsDisclaimer.Range("B2").Value = (RU @(1044,1040,1053,1053,1054,1045,32,1055,1056,1054,1043,1056,1040,1052,1052,1053,1054,1045,32,1054,1041,1045,1057,1055,1045,1063,1045,1053,1048,1045,40,1052,1040,1050,1056,1054,1057,41,32,1055,1056,1045,1044,1054,1057,1058,1040,1042,1051,1071,1045,1058,1057,1071,32,171,1050,1040,1050,32,1045,1057,1058,1068,187,44,32,1041,1045,1047,32,1050,1040,1050,1048,1061,45,1051,1048,1041,1054,32,1043,1040,1056,1040,1053,1058,1048,1049,44,32,1071,1042,1053,1054,32,1042,1067,1056,1040,1046,1045,1053,1053,1067,1061,32,1048,1051,1048,32,1055,1054,1044,1056,1040,1047,1059,1052,1045,1042,1040,1045,1052,1067,1061,44,32,1042,1050,1051,1070,1063,1040,1071,32,1043,1040,1056,1040,1053,1058,1048,1048,32,1058,1054,1042,1040,1056,1053,1054,1049,32,1055,1056,1048,1043,1054,1044,1053,1054,1057,1058,1048,44,32,1057,1054,1054,1058,1042,1045,1058,1057,1058,1042,1048,1071,32,1055,1054,32,1045,1043,1054,32,1050,1054,1053,1050,1056,1045,1058,1053,1054,1052,1059,32,1053,1040,1047,1053,1040,1063,1045,1053,1048,1070,32,1048,32,1054,1058,1057,1059,1058,1057,1058,1042,1048,1071,32,1053,1040,1056,1059,1064,1045,1053,1048,1049,44,32,1053,1054,32,1053,1045,32,1054,1043,1056,1040,1053,1048,1063,1048,1042,1040,1071,1057,1068,32,1048,1052,1048,46,32,1053,1048,32,1042,32,1050,1040,1050,1054,1052,32,1057,1051,1059,1063,1040,1045,32,1040,1042,1058,1054,1056,1067,32,1048,1051,1048,32,1055,1056,1040,1042,1054,1054,1041,1051,1040,1044,1040,1058,1045,1051,1048,32,1053,1045,32,1053,1045,1057,1059,1058,32,1054,1058,1042,1045,1058,1057,1058,1042,1045,1053,1053,1054,1057,1058,1048,32,1055,1054,32,1050,1040,1050,1048,1052,45,1051,1048,1041,1054,32,1048,1057,1050,1040,1052,44,32,1047,1040,32,1059,1065,1045,1056,1041,32,1048,1051,1048,32,1055,1054,32,1048,1053,1067,1052,32,1058,1056,1045,1041,1054,1042,1040,1053,1048,1071,1052,44,32,1042,32,1058,1054,1052,32,1063,1048,1057,1051,1045,44,32,1055,1056,1048,32,1044,1045,1049,1057,1058,1042,1048,1048,32,1050,1054,1053,1058,1056,1040,1050,1058,1040,44,32,1044,1045,1051,1048,1050,1058,1045,32,1048,1051,1048,32,1048,1053,1054,1049,32,1057,1048,1058,1059,1040,1062,1048,1048,44,32,1042,1054,1047,1053,1048,1050,1064,1048,1052,32,1048,1047,45,1047,1040,32,1048,1057,1055,1054,1051,1068,1047,1054,1042,1040,1053,1048,1071,32,1055,1056,1054,1043,1056,1040,1052,1052,1053,1054,1043,1054,32,1054,1041,1045,1057,1055,1045,1063,1045,1053,1048,1071,32,1048,1051,1048,32,1048,1053,1067,1061,32,1044,1045,1049,1057,1058,1042,1048,1049,32,1057,32,1055,1056,1054,1043,1056,1040,1052,1052,1053,1067,1052,32,1054,1041,1045,1057,1055,1045,1063,1045,1053,1048,1045,1052,46))
-    $wsDisclaimer.Range("B2").Font.Bold = $true
-    $wsDisclaimer.Range("B2").Font.Size = 28
-    $wsDisclaimer.Range("B2").HorizontalAlignment = -4108  # xlCenter
-    $wsDisclaimer.Range("B2").VerticalAlignment = -4108     # xlCenter
-    $wsDisclaimer.Range("B2").WrapText = $true
-    $wsDisclaimer.Protect((RU 49,49,52,55,48,57), $true, $true, $false, $false)
-
-    # --- Clear color on always-editable cells ---
-    $alwaysEditable = @(
-        "B3:B17",
-        "L4","M4","O4"
-    )
-    foreach ($addr in $alwaysEditable) {
-        $wsInput.Range($addr).Interior.Pattern = -4142  # xlNone
-        $wsInput.Range($addr).Locked = $false
-        $wsInput.Range($addr).Borders.LineStyle = 1  # xlContinuous
-    }
-
-    # --- Workers: unlock only active rows (default 2) ---
-    $defWorkers = 2
-    for ($i = 1; $i -le 10; $i++) {
-        $row = $i + 3
-        $wsInput.Cells.Item($row, 4).Locked = $true
-        if ($i -le $defWorkers) {
-            $wsInput.Cells.Item($row, 5).Interior.Pattern = -4142
-            $wsInput.Cells.Item($row, 5).Locked = $false
-            $wsInput.Cells.Item($row, 5).Borders.LineStyle = 1
-        } else {
-            $wsInput.Cells.Item($row, 5).Interior.Color = $lightRed
-            $wsInput.Cells.Item($row, 5).Locked = $true
-            $wsInput.Cells.Item($row, 5).Borders.LineStyle = -4142
-            $wsInput.Cells.Item($row, 5).Font.Color = $lightRed
-            $wsInput.Cells.Item($row, 4).Font.Color = $lightRed
-        }
-    }
-
-    # --- Operations: unlock only active rows (default 2) ---
-    $defOps = 2
-    # Editable op columns: H(8), I(9), J(10), K(11), N(14), P(16)
-    $editOpCols = @(8, 9, 10, 11, 14, 16)
-    # Synced locked columns: L(12), M(13), O(15)
-    $syncOpCols = @(12, 13, 15)
-    for ($i = 1; $i -le 20; $i++) {
-        $row = $i + 3
-        if ($i -le $defOps) {
-            foreach ($c in $editOpCols) {
-                $wsInput.Cells.Item($row, $c).Interior.Pattern = -4142
-                $wsInput.Cells.Item($row, $c).Locked = $false
-                $wsInput.Cells.Item($row, $c).Borders.LineStyle = 1
-            }
-            foreach ($c in $syncOpCols) {
-                $wsInput.Cells.Item($row, $c).Borders.LineStyle = 1
-                if ($i -eq 1) {
-                    # L4/M4/O4 are editable source cells
-                    $wsInput.Cells.Item($row, $c).Font.Color = 0
-                    $wsInput.Cells.Item($row, $c).Interior.Pattern = -4142
-                    $wsInput.Cells.Item($row, $c).Locked = $false
-                } else {
-                    $wsInput.Cells.Item($row, $c).Interior.Color = $lightRed
-                    $wsInput.Cells.Item($row, $c).Locked = $true
-                    $wsInput.Cells.Item($row, $c).Font.Color = 0
-                }
-            }
-        } else {
-            for ($c = 7; $c -le 16; $c++) {
-                $wsInput.Cells.Item($row, $c).Interior.Color = $lightRed
-                $wsInput.Cells.Item($row, $c).Font.Color = $lightRed
-                $wsInput.Cells.Item($row, $c).Borders.LineStyle = -4142
-                $wsInput.Cells.Item($row, $c).Locked = $true
-            }
-        }
-    }
-
-    # Lock N4 (pause for first op) — no history in fresh file
-    $wsInput.Range("N4").Locked = $true
-    $wsInput.Range("N4").Interior.Color = $lightRed
-
-    # --- L5:L23, M5:M23, O5:O23: synced values ---
-    $minText = RU @(1084,1080,1085)
-    $typeText = RU @(1054,1073,1097,1077,1077)
-    $wsInput.Range("L5:L23").Value = $minText
-    $wsInput.Range("M5:M23").Value = $typeText
-    $wsInput.Range("O5:O23").Value = $minText
-
-    # --- Data validation with error messages ---
-    $errTitle = RU @(1054,1096,1080,1073,1082,1072,32,1074,1074,1086,1076,1072)  # "Ошибка ввода"
-
-    # B3: integer, max 12 digits (VBA normalizes)
-    $wsInput.Range("B3").NumberFormat = "000000000000"
-    $wsInput.Range("B3").Validation.Delete()
-    $wsInput.Range("B3").Validation.Add(1, 1, 1, "0", "999999999999") | Out-Null
-    $wsInput.Range("B3").Validation.IgnoreBlank = $true
-    $wsInput.Range("B3").Validation.ErrorTitle = $errTitle
-    $wsInput.Range("B3").Validation.ErrorMessage = (RU @(1052,1072,1082,1089,1080,1084,1091,1084,32,49,50,32,1094,1080,1092,1088))  # "Максимум 12 цифр"
-
-    # B4: text, max 100 chars
-    $wsInput.Range("B4").Validation.Delete()
-    $wsInput.Range("B4").Validation.Add(6, 1, 8, "100") | Out-Null
-    $wsInput.Range("B4").Validation.IgnoreBlank = $true
-    $wsInput.Range("B4").Validation.ErrorTitle = $errTitle
-    $wsInput.Range("B4").Validation.ErrorMessage = (RU @(1052,1072,1082,1089,1080,1084,1091,1084,32,49,48,48,32,1089,1080,1084,1074,1086,1083,1086,1074))  # "Максимум 100 символов"
-
-    # B5, B7: date
-    foreach ($cell in @("B5","B7")) {
-        $wsInput.Range($cell).Validation.Delete()
-        $wsInput.Range($cell).Validation.Add(4, 1, 1, [int]([datetime]'2000-01-01').ToOADate(), [int]([datetime]'2099-12-31').ToOADate()) | Out-Null
-        $wsInput.Range($cell).Validation.IgnoreBlank = $true
-        $wsInput.Range($cell).Validation.ErrorTitle = $errTitle
-    }
-
-    # B6, B10, B11: time
-    foreach ($cell in @("B6","B10","B11")) {
-        $wsInput.Range($cell).Validation.Delete()
-        $wsInput.Range($cell).Validation.Add(5, 1, 1, 0, (86399 / 86400)) | Out-Null
-        $wsInput.Range($cell).Validation.IgnoreBlank = $true
-        $wsInput.Range($cell).Validation.ErrorTitle = $errTitle
-    }
-
-    # B8: integer, 1-20 (operations)
-    $wsInput.Range("B8").Validation.Delete()
-    $wsInput.Range("B8").Validation.Add(1, 1, 1, "1", "20") | Out-Null
-    $wsInput.Range("B8").Validation.ErrorTitle = $errTitle
-    $wsInput.Range("B8").Validation.ErrorMessage = (RU @(1062,1077,1083,1086,1077,32,1095,1080,1089,1083,1086,32,1086,1090,32,49,32,1076,1086,32,50,48))  # "Целое число от 1 до 20"
-
-    # B9: integer, 1-10 (workers)
-    $wsInput.Range("B9").Validation.Delete()
-    $wsInput.Range("B9").Validation.Add(1, 1, 1, "1", "10") | Out-Null
-    $wsInput.Range("B9").Validation.ErrorTitle = $errTitle
-    $wsInput.Range("B9").Validation.ErrorMessage = (RU @(1062,1077,1083,1086,1077,32,1095,1080,1089,1083,1086,32,1086,1090,32,49,32,1076,1086,32,49,48))  # "Целое число от 1 до 10"
-
-    # B12: integer, 1-600
-    $wsInput.Range("B12").Validation.Delete()
-    $wsInput.Range("B12").Validation.Add(1, 1, 1, "1", "600") | Out-Null
-    $wsInput.Range("B12").Validation.ErrorTitle = $errTitle
-    $wsInput.Range("B12").Validation.ErrorMessage = (RU @(1062,1077,1083,1086,1077,32,1095,1080,1089,1083,1086,32,1086,1090,32,49,32,1076,1086,32,54,48,48))  # "Целое число от 1 до 600"
-
-    # B13:B15: text, max 100 chars
-    foreach ($cell in @("B13","B14","B15")) {
-        $wsInput.Range($cell).Validation.Delete()
-        $wsInput.Range($cell).Validation.Add(6, 1, 8, "100") | Out-Null
-        $wsInput.Range($cell).Validation.IgnoreBlank = $true
-        $wsInput.Range($cell).Validation.ErrorTitle = $errTitle
-        $wsInput.Range($cell).Validation.ErrorMessage = (RU @(1052,1072,1082,1089,1080,1084,1091,1084,32,49,48,48,32,1089,1080,1084,1074,1086,1083,1086,1074))
-    }
-
-    # B16:B17: text, max 20 chars (VBA normalizes)
-    foreach ($cell in @("B16","B17")) {
-        $wsInput.Range($cell).Validation.Delete()
-        $wsInput.Range($cell).Validation.Add(6, 1, 8, "20") | Out-Null
-        $wsInput.Range($cell).Validation.IgnoreBlank = $true
-        $wsInput.Range($cell).Validation.ErrorTitle = $errTitle
-        $wsInput.Range($cell).Validation.ErrorMessage = (RU @(1052,1072,1082,1089,1080,1084,1091,1084,32,50,48,32,1089,1080,1084,1074,1086,1083,1086,1074))  # "Максимум 20 символов"
-    }
-
-    # E4:E13: integer, 8 digits
-    $wsInput.Range("E4:E13").Validation.Delete()
-    $wsInput.Range("E4:E13").Validation.Add(1, 1, 1, "0", "99999999") | Out-Null
-    $wsInput.Range("E4:E13").Validation.IgnoreBlank = $true
-    $wsInput.Range("E4:E13").Validation.ErrorTitle = $errTitle
-    $wsInput.Range("E4:E13").Validation.ErrorMessage = (RU @(1052,1072,1082,1089,1080,1084,1091,1084,32,56,32,1094,1080,1092,1088))  # "Максимум 8 цифр"
-
-    # H4:H23: integer, max 8 digits (VBA normalizes)
-    $wsInput.Range("H4:H23").NumberFormat = "00000000"
-    $wsInput.Range("H4:H23").Validation.Delete()
-    $wsInput.Range("H4:H23").Validation.Add(1, 1, 1, "0", "99999999") | Out-Null
-    $wsInput.Range("H4:H23").Validation.IgnoreBlank = $true
-    $wsInput.Range("H4:H23").Validation.ErrorTitle = $errTitle
-    $wsInput.Range("H4:H23").Validation.ErrorMessage = (RU @(1052,1072,1082,1089,1080,1084,1091,1084,32,56,32,1094,1080,1092,1088))  # "Максимум 8 цифр"
-
-    # I4:I23: text, max 100 chars
-    $wsInput.Range("I4:I23").Validation.Delete()
-    $wsInput.Range("I4:I23").Validation.Add(6, 1, 8, "100") | Out-Null
-    $wsInput.Range("I4:I23").Validation.IgnoreBlank = $true
-    $wsInput.Range("I4:I23").Validation.ErrorTitle = $errTitle
-    $wsInput.Range("I4:I23").Validation.ErrorMessage = (RU @(1052,1072,1082,1089,1080,1084,1091,1084,32,49,48,48,32,1089,1080,1084,1074,1086,1083,1086,1074))
-
-    # J4:J23: decimal, 0-999999.99 (Data Validation)
-    $decSep = [string]$excel.International(3)
-    $maxDec = "999999" + $decSep + "99"
-    $decErrMsg = (RU @(1063,1080,1089,1083,1086,32,1086,1090,32,48,32,1076,1086,32,57,57,57,57,57,57,44,57,57))  # "Число от 0 до 999999,99"
-    foreach ($rng in @("J4:J23")) {
-        $wsInput.Range($rng).Validation.Delete()
-        $wsInput.Range($rng).Validation.Add(2, 1, 1, "0", $maxDec) | Out-Null
-        $wsInput.Range($rng).Validation.IgnoreBlank = $true
-        $wsInput.Range($rng).Validation.ErrorTitle = $errTitle
-        $wsInput.Range($rng).Validation.ErrorMessage = $decErrMsg
-    }
-    # K4:K23, N4:N23: sanitized in VBA after input
-    foreach ($rng in @("K4:K23","N4:N23")) {
-        $wsInput.Range($rng).Validation.Delete()
-    }
-
-    # L4, O4: selector мин/час (only first row editable)
-    $listSep = $excel.International(5)
-    $unitList = (RU @(1084,1080,1085)) + $listSep + (RU @(1095,1072,1089))
-    $unitErrMsg = (RU @(1042,1099,1073,1077,1088,1080,1090,1077,32,1084,1080,1085,32,1080,1083,1080,32,1095,1072,1089))  # "Выберите мин или час"
-    foreach ($rng in @("L4","O4")) {
-        $wsInput.Range($rng).Validation.Delete()
-        $wsInput.Range($rng).Validation.Add(3, 1, 1, $unitList) | Out-Null
-        $wsInput.Range($rng).Validation.IgnoreBlank = $true
-        $wsInput.Range($rng).Validation.InCellDropdown = $true
-        $wsInput.Range($rng).Validation.ErrorTitle = $errTitle
-        $wsInput.Range($rng).Validation.ErrorMessage = $unitErrMsg
-    }
-
-    $typeList = (RU @(1054,1073,1097,1077,1077)) + $listSep + (RU @(1053,1072,32,1050,1072,1078,1076,1086,1075,1086))
-    $typeErrMsg = (RU @(1042,1099,1073,1077,1088,1080,1090,1077,32,1090,1080,1087,32,1079,1072,1076,1072,1085,1080,1103))
-    $wsInput.Range("M4").Validation.Delete()
-    $wsInput.Range("M4").Validation.Add(3, 1, 1, $typeList) | Out-Null
-    $wsInput.Range("M4").Validation.IgnoreBlank = $true
-    $wsInput.Range("M4").Validation.InCellDropdown = $true
-    $wsInput.Range("M4").Validation.ErrorTitle = $errTitle
-    $wsInput.Range("M4").Validation.ErrorMessage = $typeErrMsg
-
-    # P4:P23: participants spec (sanitized in VBA after input)
-    $wsInput.Range("P4:P23").Validation.Delete()
-
-    $wsResult.Range("A1").Value2 = ""
-    $wsResult.Range("B1").Value = (RU @(8470))
-    $wsResult.Range("C1").Value = (RU @(1054,1087,1077,1088,1072,1094,1080,1103))
-    $wsResult.Range("D1").Value = (RU @(1054,1073,1077,1076,63))
-    $wsResult.Range("E1").Value = (RU @(1055,1072,1091,1079,1072,32,40,1084,1080,1085,41))
-    $wsResult.Range("F1").Value = (RU @(1056,1072,1073,1086,1090,1072,32,40,1095,1072,1089,41))
-    $wsResult.Range("G1").Value = (RU @(1055,1044,1058,1042))
-    $wsResult.Range("H1").Value2 = "-"
-    $wsResult.Range("I1").Value2 = "-"
-    $wsResult.Range("J1").Value2 = "-"
-    $wsResult.Range("K1").Value2 = "-"
-    $wsResult.Range("L1").Value = (RU @(1056,1072,1073,1086,1090,1072,32,40,1084,1080,1085,41))
-    $wsResult.Range("M1").Value2 = "-"
-    $wsResult.Range("N1").Value2 = "-"
-    $wsResult.Range("O1").Value = (RU @(1044,1072,1090,1072,32,1087,1088,1086,1074,1086,1076,1082,1080))
-    $wsResult.Range("P1").Value = (RU @(1048,1089,1087,1086,1083,1085,1080,1090,1077,1083,1100))
-    $wsResult.Range("Q1").Value2 = "-"
-    $wsResult.Range("R1").Value = (RU @(1044,1072,1090,1072,32,1053,1072,1095,1072,1083,1072))
-    $wsResult.Range("S1").Value = (RU @(1042,1088,1077,1084,1103,32,1053,1072,1095,1072,1083,1072))
-    $wsResult.Range("T1").Value = (RU @(1044,1072,1090,1072,32,1050,1086,1085,1094,1072))
-    $wsResult.Range("U1").Value = (RU @(1042,1088,1077,1084,1103,32,1050,1086,1085,1094,1072))
-    $wsResult.Range("V1").Value2 = "INDEX"
-    $wsResult.Range("A1:V1").Font.Bold = $true
-    $wsResult.Columns("A:V").AutoFit() | Out-Null
-    $wsResult.Columns("A:A").ColumnWidth = 2.7
-    $wsResult.Columns("H:K").ColumnWidth = 2.7
-    $wsResult.Columns("M:N").ColumnWidth = 2.7
-    $wsResult.Columns("Q:Q").ColumnWidth = 2.7
-
-    # --- Result sheet formatting ---
-    $lightRed = 230*65536 + 230*256 + 255  # RGB(255,230,230) in BGR
-    $wsResult.Cells.Interior.Color = $lightRed
-    $wsResult.Cells.HorizontalAlignment = -4108  # xlCenter
-    $wsResult.Cells.VerticalAlignment = -4108    # xlCenter
-    $wsResult.Cells.Locked = $true
-    # Borders on header row
-    $wsResult.Range("B1:V1").Borders.LineStyle = 1  # xlContinuous
-    $wsResult.Protect((RU 49,49,52,55,48,57), $true, $true, $false, $false)
-
-    $txt1 = RU @(1047,1072,1082,1072,1079,1086,1074,32,1085,1072,32,1083,1080,1089,1090,1077,58,32)
-    $txt2 = RU @(32,124,32,1055,1086,1076,1090,1074,1077,1088,1078,1076,1077,1085,1086,58,32)
-    $txt3 = RU @(32,124,32,1053,1045,32,1055,1086,1076,1090,1074,1077,1088,1078,1076,1077,1085,1086,58,32)
-    $valY = RU @(1055,1086,1076,1090,1074,1077,1088,1078,1076,1077,1085,1086)
-    $valN = RU @(1053,1045,32,1055,1086,1076,1090,1074,1077,1088,1078,1076,1077,1085,1086)
-    $fHist = '="' + $txt1 + '" & (COUNTIF(B4:B10000, "' + $valY + '") + COUNTIF(B4:B10000, "' + $valN + '")) & "' + $txt2 + '" & COUNTIF(B4:B10000, "' + $valY + '") & "' + $txt3 + '" & COUNTIF(B4:B10000, "' + $valN + '")'
-
-    $wsHistory.Range("B1:V1").Merge() | Out-Null
-    $wsHistory.Range("B1").Value = (RU @(1048,1089,1090,1086,1088,1080,1103))
-    $wsHistory.Range("B1").Formula = $fHist
-    $wsHistory.Range("B1").Font.Bold = $true
-    $wsHistory.Range("B1").Font.Size = 14
-    $wsHistory.Range("B1:V1").Borders.LineStyle = 1  # xlContinuous
-    $wsHistory.Range("B1:V1").HorizontalAlignment = -4108
-    $wsHistory.Rows(1).RowHeight = 30
-
-    $wsHistory.Range("B2:V2").Merge() | Out-Null
-    $wsHistory.Range("B2").Value = (RU @(1057,1092,1086,1088,1084,1080,1088,1086,1074,1072,1085,1086,32,1087,1088,1080,32,1087,1086,1084,1086,1097,1080,32,1087,1088,1086,1075,1088,1072,1084,1084,1099,32,84,105,109,101,84,111,84,97,98,108,101,45,86,66,65,32,98,121,32,1043,1072,1083,1080,1084,1079,1103,1085,1086,1074,32,1043,46,1056,46))
-    $wsHistory.Range("B2").Font.Bold = $true
-    $wsHistory.Range("B2").Font.Size = 14
-    $wsHistory.Range("B2:V2").Borders.LineStyle = 1
-    $wsHistory.Rows(2).RowHeight = 30
-    $wsHistory.Cells.Font.Size = 14
-    
-    $txt1 = RU @(1047,1072,1082,1072,1079,1086,1074,32,1085,1072,32,1083,1080,1089,1090,1077,58,32)
-    $txt2 = RU @(32,124,32,1055,1086,1076,1090,1074,1077,1088,1078,1076,1077,1085,1086,58,32)
-    $txt3 = RU @(32,124,32,1053,1045,32,1055,1086,1076,1090,1074,1077,1088,1078,1076,1077,1085,1086,58,32)
-    $valY = RU @(1055,1086,1076,1090,1074,1077,1088,1078,1076,1077,1085,1086)
-    $valN = RU @(1053,1045,32,1055,1086,1076,1090,1074,1077,1088,1078,1076,1077,1085,1086)
-    $fHist = '="' + $txt1 + '" & (COUNTIF(B4:B10000, "' + $valY + '") + COUNTIF(B4:B10000, "' + $valN + '")) & "' + $txt2 + '" & COUNTIF(B4:B10000, "' + $valY + '") & "' + $txt3 + '" & COUNTIF(B4:B10000, "' + $valN + '")'
-
-    $wsHistory.Range("B3:V3").Merge() | Out-Null
-    $wsHistory.Range("B3").Formula = $fHist
-    $wsHistory.Range("B3").Value = (RU @(1048,1089,1090,1086,1088,1080,1103))
-    $wsHistory.Range("B3").Font.Bold = $true
-    $wsHistory.Range("B3").Font.Size = 14
-    $wsHistory.Range("B3:V3").Borders.LineStyle = 1
-    $wsHistory.Range("B3:V3").HorizontalAlignment = -4108
-    $wsHistory.Rows("1:3").WrapText = $true
-    $wsHistory.Rows(3).RowHeight = 25
-    $wsHistory.Columns("A:A").ColumnWidth = 1
-    $wsHistory.Columns("B:B").ColumnWidth = 3
-    $wsHistory.Columns("C:C").ColumnWidth = 63
-    $wsHistory.Columns("D:D").ColumnWidth = 8
-    $wsHistory.Columns("E:E").ColumnWidth = 10
-    $wsHistory.Columns("F:F").ColumnWidth = 10
-    $wsHistory.Columns("G:G").ColumnWidth = 12
-    $wsHistory.Columns("H:K").ColumnWidth = 1
-    $wsHistory.Columns("L:L").ColumnWidth = 10
-    $wsHistory.Columns("M:N").ColumnWidth = 1
-    $wsHistory.Columns("O:O").ColumnWidth = 15
-    $wsHistory.Columns("P:P").ColumnWidth = 16
-    $wsHistory.Columns("Q:Q").ColumnWidth = 1
-    $wsHistory.Columns("R:R").ColumnWidth = 14
-    $wsHistory.Columns("S:S").ColumnWidth = 14
-    $wsHistory.Columns("T:T").ColumnWidth = 14
-    $wsHistory.Columns("U:U").ColumnWidth = 14
-    $wsHistory.Columns("V:V").ColumnWidth = 8
-
-    # --- History Save button ---
-    $btnHistSaveLeft = [double]$wsHistory.Range("T1").Left + 10
-    $btnHistSaveTop = [double]$wsHistory.Range("T1").Top + 4
-    $btnHistSaveWidth = 100
-    $btnHistSave = $wsHistory.Shapes.AddShape(1, $btnHistSaveLeft, $btnHistSaveTop, $btnHistSaveWidth, 22)
-    $btnHistSave.Name = "btnSaveHistory"
-    $btnHistSave.TextFrame.Characters().Text = (RU @(1057,1086,1093,1088,1072,1085,1080,1090,1100)) # "Сохранить"
-    $btnHistSave.TextFrame.HorizontalAlignment = -4108  # xlCenter
-    $btnHistSave.TextFrame.VerticalAlignment = -4108     # xlCenter
-    $btnHistSave.Fill.ForeColor.RGB = 12419407  # RGB(79,129,189) blue
-    $btnHistSave.Line.ForeColor.RGB = 3355443
-    $btnHistSave.TextFrame.Characters().Font.Color = 16777215  # white
-    $btnHistSave.OnAction = "SaveHistorySheet"
-
-    # --- History sheet formatting (same as Result) ---
-    $wsHistory.Cells.Interior.Color = $lightRed
-    $wsHistory.Cells.HorizontalAlignment = -4108  # xlCenter
-    $wsHistory.Cells.VerticalAlignment = -4108    # xlCenter
-    $wsHistory.Cells.Locked = $true
-    $wsHistory.Protect((RU 49,49,52,55,48,57), $true, $true, $false, $false)
-
-    # --- Setup MRS sheet ---
-    $wsTechCards.Cells.Interior.Color = $lightRed
-    $wsTechCards.Cells.HorizontalAlignment = -4108  # xlCenter
-    $wsTechCards.Cells.VerticalAlignment = -4108     # xlCenter
-    $wsTechCards.Cells.Font.Size = 14
-    $wsTechCards.Cells.Locked = $true
-
-    $wsTechCards.Range("B1:N1").Merge() | Out-Null
-    $wsTechCards.Range("B1").Formula = $fHist
-    $wsTechCards.Range("B1").Font.Bold = $true
-    $wsTechCards.Range("B1:N1").Borders.LineStyle = 1
-    $wsTechCards.Range("B1:N1").HorizontalAlignment = -4108
-    $wsTechCards.Rows(1).RowHeight = 30
-
-    $wsTechCards.Range("B2:N2").Merge() | Out-Null
-    $wsTechCards.Range("B2").Value = (RU @(1057,1092,1086,1088,1084,1080,1088,1086,1074,1072,1085,1086,32,1087,1088,1080,32,1087,1086,1084,1086,1097,1080,32,1087,1088,1086,1075,1088,1072,1084,1084,1099,32,84,105,109,101,84,111,84,97,98,108,101,45,86,66,65,32,98,121,32,1043,1072,1083,1080,1084,1079,1103,1085,1086,1074,32,1043,46,1056,46))
-    $wsTechCards.Range("B2").Font.Bold = $true
-    $wsTechCards.Range("B2").Font.Size = 14
-    $wsTechCards.Range("B2:N2").Borders.LineStyle = 1
-    $wsTechCards.Rows(2).RowHeight = 30
-
-    $wsTechCards.Range("B3:N3").Merge() | Out-Null
-    $wsTechCards.Range("B3").Value = (RU @(1055,1072,1088,1089,1080,1085,1075,32,77,82,83))  # Парсинг MRS
-    $wsTechCards.Range("B3").Font.Bold = $true
-    $wsTechCards.Range("B3:N3").Borders.LineStyle = 1
-    $wsTechCards.Rows(3).RowHeight = 25
-
-    # Column widths
-    $wsTechCards.Columns("A:A").ColumnWidth = 1
-    $wsTechCards.Columns("B:B").ColumnWidth = 4
-    $wsTechCards.Columns("C:C").ColumnWidth = 13
-    $wsTechCards.Columns("D:D").ColumnWidth = 45
-    $wsTechCards.Columns("E:E").ColumnWidth = 12
-    $wsTechCards.Columns("F:F").ColumnWidth = 15
-    $wsTechCards.Columns("G:G").ColumnWidth = 17
-    $wsTechCards.Columns("H:H").ColumnWidth = 15
-    $wsTechCards.Columns("I:I").ColumnWidth = 17
-    $wsTechCards.Columns("J:J").ColumnWidth = 19
-    $wsTechCards.Columns("K:K").ColumnWidth = 19
-    $wsTechCards.Columns("L:L").ColumnWidth = 18
-    $wsTechCards.Columns("M:M").ColumnWidth = 18
-    $wsTechCards.Columns("N:N").ColumnWidth = 10
-
-    # --- MRS Save button ---
-    $btnMrsSaveLeft = [double]$wsTechCards.Range("L1").Left + 10
-    $btnMrsSaveTop = [double]$wsTechCards.Range("L1").Top + 4
-    $btnMrsSaveWidth = 100
-    $btnMrsSave = $wsTechCards.Shapes.AddShape(1, $btnMrsSaveLeft, $btnMrsSaveTop, $btnMrsSaveWidth, 22)
-    $btnMrsSave.Name = "btnSaveMRS"
-    $btnMrsSave.TextFrame.Characters().Text = (RU @(1057,1086,1093,1088,1072,1085,1080,1090,1100)) # "Сохранить"
-    $btnMrsSave.TextFrame.HorizontalAlignment = -4108  # xlCenter
-    $btnMrsSave.TextFrame.VerticalAlignment = -4108     # xlCenter
-    $btnMrsSave.Fill.ForeColor.RGB = 12419407  # RGB(79,129,189) blue
-    $btnMrsSave.Line.ForeColor.RGB = 3355443
-    $btnMrsSave.TextFrame.Characters().Font.Color = 16777215  # white
-    $btnMrsSave.OnAction = "SaveMRSSheet"
-
-    $wsTechCards.Protect((RU 49,49,52,55,48,57), $true, $true, $false, $false)
-
-    # --- Notes sheet ---
-    $wsNotes.Cells.Interior.Color = $lightRed
-    $wsNotes.Cells.HorizontalAlignment = -4108  # xlCenter
-    $wsNotes.Cells.VerticalAlignment = -4108    # xlCenter
-    $wsNotes.Cells.WrapText = $true
-    $wsNotes.Cells.Locked = $true
-
-    $wsNotes.Columns("A:A").ColumnWidth = 2
-    $wsNotes.Columns("B:B").ColumnWidth = 10
-    $wsNotes.Columns("C:C").ColumnWidth = 60
-    $wsNotes.Columns("D:D").ColumnWidth = 2
-    $wsNotes.Columns("E:E").ColumnWidth = 2
-    $wsNotes.Columns("F:F").ColumnWidth = 150
-
-    $wsNotes.Range("B2:C2").Merge() | Out-Null
-    $wsNotes.Range("B2").Value = (RU @(1048,1089,1087,1086,1083,1085,1080,1090,1077,1083,1080))
-    $wsNotes.Range("F2").Value2 = "Z"
-    $wsNotes.Range("B2:C2").Font.Bold = $true
-    $wsNotes.Range("F2").Font.Bold = $true
-    $wsNotes.Range("B2:C52").Borders.LineStyle = 1
-    $wsNotes.Range("F2:F52").Borders.LineStyle = 1
-
-    $wsNotes.Range("B3:B52").NumberFormat = "00000000"
-    $wsNotes.Range("B3:B52").Locked = $false
-    $wsNotes.Range("B3:B52").Interior.Pattern = -4142
-    $wsNotes.Range("C3:C52").Locked = $false
-    $wsNotes.Range("C3:C52").Interior.Pattern = -4142
-    $wsNotes.Range("F3:F52").Locked = $false
-    $wsNotes.Range("F3:F52").Interior.Pattern = -4142
-    foreach ($mergeStart in @(3, 13, 23, 33, 43)) {
-        $wsNotes.Range("F${mergeStart}:F$($mergeStart + 9)").Merge() | Out-Null
-    }
-
-    $notesErrTitle = (RU @(1054,1096,1080,1073,1082,1072,32,1074,1074,1086,1076,1072))
-    $wsNotes.Range("B3:B52").Validation.Delete()
-    $wsNotes.Range("B3:B52").Validation.Add(1, 1, 1, "0", "99999999") | Out-Null
-    $wsNotes.Range("B3:B52").Validation.IgnoreBlank = $true
-    $wsNotes.Range("B3:B52").Validation.ErrorTitle = $notesErrTitle
-    $wsNotes.Range("B3:B52").Validation.ErrorMessage = (RU @(1052,1072,1082,1089,1080,1084,1091,1084,32,56,32,1094,1080,1092,1088))
-
-    $wsNotes.Protect((RU 49,49,52,55,48,57), $true, $true, $false, $false)
-
-    $buttonLeft = [double]$wsInput.Range("A19").Left
-    $buttonTop = [double]$wsInput.Range("A19").Top
-    $buttonWidth = [double]$wsInput.Columns("A:A").Width + [double]$wsInput.Columns("B:B").Width
-    $button = $wsInput.Shapes.AddShape(1, $buttonLeft, $buttonTop, $buttonWidth, 32)
-    $button.Name = "btnGenerateSchedule"
-    $button.TextFrame.Characters().Text = (RU @(1057,1092,1086,1088,1084,1080,1088,1086,1074,1072,1090,1100,32,1058,1072,1073,1083,1080,1094,1091))
-    $button.TextFrame.HorizontalAlignment = -4108  # xlCenter
-    $button.TextFrame.VerticalAlignment = -4108     # xlCenter
-    $button.Fill.ForeColor.RGB = 5296274
-    $button.Line.ForeColor.RGB = 3355443
-    $button.OnAction = "GenerateAndAppendHistory"
-
-    $clearButtonLeft = $buttonLeft
-    $clearButtonTop = $buttonTop + 38
-    $clearButton = $wsInput.Shapes.AddShape(1, $clearButtonLeft, $clearButtonTop, $buttonWidth, 28)
-    $clearButton.Name = "btnClearSchedule"
-    $clearButton.TextFrame.Characters().Text = (RU @(1054,1095,1080,1089,1090,1080,1090,1100,32,1048,1089,1090,1086,1088,1080,1102))
-    $clearButton.TextFrame.HorizontalAlignment = -4108  # xlCenter
-    $clearButton.TextFrame.VerticalAlignment = -4108     # xlCenter
-    $clearButton.Fill.ForeColor.RGB = 10066329
-    $clearButton.Line.ForeColor.RGB = 3355443
-    $clearButton.OnAction = "ClearResultAndHistory"
-
-    $mrsButtonLeft = $buttonLeft
-    $mrsButtonTop = $clearButtonTop + 40
-    $mrsButton = $wsInput.Shapes.AddShape(1, $mrsButtonLeft, $mrsButtonTop, $buttonWidth, 28)
-    $mrsButton.Name = "btnLoadMRS"
-    $mrsButton.TextFrame.Characters().Text = (RU @(1047,1072,1075,1088,1091,1079,1080,1090,1100,32,1044,1072,1085,1085,1099,1077,32,1048,1079,32,83,65,80))
-    $mrsButton.TextFrame.HorizontalAlignment = -4108  # xlCenter
-    $mrsButton.TextFrame.VerticalAlignment = -4108     # xlCenter
-    $mrsButton.Fill.ForeColor.RGB = 12419407  # RGB(79,129,189) blue
-    $mrsButton.Line.ForeColor.RGB = 3355443
-    $mrsButton.TextFrame.Characters().Font.Color = 16777215  # white
-    $mrsButton.OnAction = "LoadMRS"
-
-    $clearMrsLeft = $buttonLeft
-    $clearMrsTop = $mrsButtonTop + 34
-    $clearMrsBtn = $wsInput.Shapes.AddShape(1, $clearMrsLeft, $clearMrsTop, $buttonWidth, 28)
-    $clearMrsBtn.Name = "btnClearMRS"
-    $clearMrsBtn.TextFrame.Characters().Text = (RU @(1054,1095,1080,1089,1090,1080,1090,1100,32,1055,1072,1088,1089,1080,1085,1075,32,77,82,83))
-    $clearMrsBtn.TextFrame.HorizontalAlignment = -4108  # xlCenter
-    $clearMrsBtn.TextFrame.VerticalAlignment = -4108     # xlCenter
-    $clearMrsBtn.Fill.ForeColor.RGB = 10066329  # gray
-    $clearMrsBtn.Line.ForeColor.RGB = 3355443
-    $clearMrsBtn.OnAction = "ClearMRS"
-
-    # --- Color settings (rows 30-36) ---
-    $wsInput.Range("A29:B29").Merge() | Out-Null
-    $wsInput.Range("A29").Value = (RU @(1053,1072,1089,1090,1088,1086,1081,1082,1080,32,1062,1074,1077,1090,1086,1074))  # "Настройки Цветов"
-    $wsInput.Range("A29").Font.Bold = $true
-
-    $wsInput.Cells.Item(31, 1).Value = (RU @(1047,1072,1073,1083,1086,1082,1080,1088,1086,1074,1072,1085,1085,1099,1077))                         # "Заблокированные"
-    $wsInput.Cells.Item(32, 1).Value = (RU @(1056,1077,1076,1072,1082,1090,1080,1088,1091,1077,1084,1099,1077))                                   # "Редактируемые"
-    $wsInput.Cells.Item(33, 1).Value = (RU @(1055,1072,1088,1089,1080,1085,1075,32,77,82,83,32,1044,1072,1090,1072))                              # "Парсинг MRS Дата"
-    $wsInput.Cells.Item(34, 1).Value = (RU @(1055,1072,1088,1089,1080,1085,1075,32,77,82,83,32,1041,1088,1080,1075,1072,1076,1072))               # "Парсинг MRS Бригада"
-    $wsInput.Cells.Item(35, 1).Value = (RU @(1047,1072,1082,1072,1079,32,1055,1044,1058,1042))                                                      # "Заказ ПДТВ"
-    $wsInput.Cells.Item(36, 1).Value = (RU @(1047,1072,1082,1072,1079,32,1053,1045,32,1055,1044,1058,1042))                                         # "Заказ НЕ ПДТВ"
-    $wsInput.Cells.Item(37, 1).Value = (RU @(1064,1072,1087,1082,1072))                                                                            # "Шапка"
-
-    # Lock merged header row 29
-    $wsInput.Range("A29:B29").Locked = $true
-    # Lock label cells (A31:A37), unlock color sample cells (B31:B37)
-    for ($r = 31; $r -le 37; $r++) {
-        $wsInput.Cells.Item($r, 1).Locked = $true
-        $wsInput.Cells.Item($r, 2).Locked = $false
-    }
-
-    # Set default fill colors and borders in B column
-    $clrDefLocked         = 15132415   # RGB(255,230,230)
-    $clrDefMrsHeader      = 15189684   # RGB(180,198,231)
-    $clrDefMrsSub         = 16768200   # RGB(200,220,255)
-    $clrDefMrsOrder       = 13167560   # RGB(200,235,200)
-    $clrDefMrsOrderUnconf = 14277081   # RGB(217,217,217)
-    $clrDefHeader         = 13167560   # RGB(200,235,200)
-
-    $wsInput.Cells.Item(31, 2).Interior.Color = $clrDefLocked
-    # Row 32 (Editable) - no fill by default (xlNone)
-    $wsInput.Cells.Item(32, 2).Interior.Pattern = -4142  # xlNone
-    $wsInput.Cells.Item(33, 2).Interior.Color = $clrDefMrsHeader
-    $wsInput.Cells.Item(34, 2).Interior.Color = $clrDefMrsSub
-    $wsInput.Cells.Item(35, 2).Interior.Color = $clrDefMrsOrder
-    $wsInput.Cells.Item(36, 2).Interior.Color = $clrDefMrsOrderUnconf
-    $wsInput.Cells.Item(37, 2).Interior.Color = $clrDefHeader
-
-    # Add borders to B31:B37
-    for ($r = 31; $r -le 37; $r++) {
-        $wsInput.Cells.Item($r, 2).Borders.LineStyle = 1  # xlContinuous
-    }
-
-    # --- Small "pick color" buttons in column C for rows 31-37 ---
-    $pickBtnNames = @(
-        @{ Row = 31; Action = "PickColorLocked" },
-        @{ Row = 32; Action = "PickColorEditable" },
-        @{ Row = 33; Action = "PickColorMrsHeader" },
-        @{ Row = 34; Action = "PickColorMrsSub" },
-        @{ Row = 35; Action = "PickColorMrsOrder" },
-        @{ Row = 36; Action = "PickColorMrsOrderUnconf" },
-        @{ Row = 37; Action = "PickColorHeader" }
-    )
-    foreach ($btn in $pickBtnNames) {
-        $r = $btn.Row
-        $btnLeft   = [double]$wsInput.Cells.Item($r, 3).Left
-        $btnTop    = [double]$wsInput.Cells.Item($r, 3).Top + 1
-        $btnHeight = [double]$wsInput.Rows($r).RowHeight - 2
-        $btnWidth  = 20
-        $shape = $wsInput.Shapes.AddShape(1, $btnLeft, $btnTop, $btnWidth, $btnHeight)
-        $shape.Name = "btn_" + $btn.Action
-        $shape.TextFrame.Characters().Text = "..."
-        $shape.TextFrame.Characters().Font.Size = 8
-        $shape.TextFrame.HorizontalAlignment = -4108  # xlCenter
-        $shape.TextFrame.VerticalAlignment = -4108     # xlCenter
-        $shape.Fill.ForeColor.RGB = 15790320  # light gray
-        $shape.Line.ForeColor.RGB = 10066329  # darker gray
-        $shape.OnAction = $btn.Action
-    }
-
-    # --- Protect input sheet (empty password) ---
-    $wsInput.Protect((RU 49,49,52,55,48,57), $true, $true, $false, $false)
-
-    try {
-        $wsHistory.Activate()
-        $excel.ActiveWindow.SplitRow = 1
-        $excel.ActiveWindow.FreezePanes = $true
-        $wsTechCards.Activate()
-        $excel.ActiveWindow.SplitRow = 1
-        $excel.ActiveWindow.FreezePanes = $true
-        $wsInput.Activate()
-    } catch {}
-
-    try {
-        $vbComp = $wb.VBProject.VBComponents.Add(1)
-        $vbComp.Name = "modTimeToTable"
-        $null = $vbComp.CodeModule.AddFromString($vbaCode)
-        $sheetComp = $wb.VBProject.VBComponents.Item($wsInput.CodeName)
-        $null = $sheetComp.CodeModule.AddFromString($inputSheetCode)
-        $notesComp = $wb.VBProject.VBComponents.Item($wsNotes.CodeName)
-        $null = $notesComp.CodeModule.AddFromString($notesSheetCode)
-        $wbComp = $wb.VBProject.VBComponents.Item($wb.CodeName)
-        $null = $wbComp.CodeModule.AddFromString($workbookCode)
-    } catch {
-        throw "Failed to inject VBA code. In Excel enable: Trust Center -> Trust access to the VBA project object model. Details: $($_.Exception.Message)"
-    }
-
-    $xlOpenXMLWorkbookMacroEnabled = 52
-    $targetDir = Split-Path -Path $OutputPath -Parent
-    if (-not [string]::IsNullOrWhiteSpace($targetDir) -and -not (Test-Path $targetDir)) {
-        New-Item -ItemType Directory -Path $targetDir | Out-Null
-    }
-    $excel.EnableEvents = $true
-    $wb.Protect((-join ([char[]](49,49,52,55,48,57))), $true, $false)
-    $wb.SaveAs($OutputPath, $xlOpenXMLWorkbookMacroEnabled)
-
-} finally {
-    try {
-        if ($hadAccessVBOMValue) {
-            $restoreExpected = [int]$previousAccessVBOM
-            New-ItemProperty -Path $securityKey -Name AccessVBOM -Value ([int]$previousAccessVBOM) -PropertyType DWord -Force | Out-Null
-        } else {
-            $restoreExpected = $null
-            Remove-ItemProperty -Path $securityKey -Name AccessVBOM -ErrorAction SilentlyContinue
-            if (-not $hadSecurityKey) {
-                Remove-Item -Path $securityKey -Force -ErrorAction SilentlyContinue
-            }
-        }
-    } catch {}
-
-    if ($wb -ne $null) {
-        try { $wb.Close($false) } catch {}
-        [void][Runtime.InteropServices.Marshal]::ReleaseComObject($wb)
-    }
-    if ($excel -ne $null) {
-        try { $excel.Quit() } catch {}
-        [void][Runtime.InteropServices.Marshal]::ReleaseComObject($excel)
-    }
-
-    $actualAccessVBOM = $null
-    $hasAccessVBOMNow = $false
-    try {
-        $actualAccessVBOM = (Get-ItemProperty -Path $securityKey -Name AccessVBOM -ErrorAction Stop).AccessVBOM
-        $hasAccessVBOMNow = $true
-    } catch {
-        $hasAccessVBOMNow = $false
-    }
-
-    if ($restoreExpected -eq $null) {
-        if ($hasAccessVBOMNow) {
-            throw "Security rollback failed: AccessVBOM should be absent, but current value is '$actualAccessVBOM'."
-        }
-    } else {
-        if (-not $hasAccessVBOMNow -or [int]$actualAccessVBOM -ne [int]$restoreExpected) {
-            throw "Security rollback failed: AccessVBOM should be '$restoreExpected', but current value is '$actualAccessVBOM'."
-        }
-    }
-
-    [GC]::Collect()
-    [GC]::WaitForPendingFinalizers()
-}
-
-Update-WorkbookFontsToArial -WorkbookPath $OutputPath
-Write-Output "CREATED: $OutputPath"
