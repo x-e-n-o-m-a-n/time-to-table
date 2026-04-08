@@ -110,6 +110,11 @@ Private Const CLR_DEF_MRS_SUB As Long = 16768200
 Private Const CLR_DEF_MRS_ORDER As Long = 13167560
 Private Const CLR_DEF_MRS_ORDER_UNCONF As Long = 14277081
 Private Const CLR_DEF_HEADER As Long = 13167560
+Private Const MAX_DIALOG_LIST_ITEM_LEN As Long = 240
+Private Const MAX_OPERATION_COUNT As Long = 20
+Private Const FIRST_OPERATION_ROW As Long = 4
+Private Const LAST_OPERATION_ROW As Long = FIRST_OPERATION_ROW + MAX_OPERATION_COUNT - 1
+Private Const MAX_WORKER_COUNT As Long = 20
 
 Private Function ReadCellColor(ByVal cell As Range, ByVal defaultColor As Long) As Long
     If cell.Interior.Pattern = xlNone Or cell.Interior.Color = 0 Then
@@ -425,12 +430,12 @@ Private Sub RefreshInputSheetColors(ByVal wsIn As Worksheet, ByVal wsHist As Wor
 
     workerCount = CLng(Val(wsIn.Range("B9").Value))
     If workerCount < 1 Then workerCount = 1
-    If workerCount > 10 Then workerCount = 10
+    If workerCount > MAX_WORKER_COUNT Then workerCount = MAX_WORKER_COUNT
     SyncWorkerIdInputs wsIn, workerCount
 
     opCount = CLng(Val(wsIn.Range("B8").Value))
     If opCount < 1 Then opCount = 1
-    If opCount > 20 Then opCount = 20
+    If opCount > MAX_OPERATION_COUNT Then opCount = MAX_OPERATION_COUNT
     SyncOperationRows wsIn, opCount
 
     SyncPauseInputCell wsIn, wsHist, clrLocked, clrEditHasColor, clrEditable
@@ -855,7 +860,7 @@ Public Sub GenerateAndAppendHistory()
     Dim workerCount As Long
     workerCount = CLng(val(wsIn.Range("B9").Value))
     If workerCount < 1 Then workerCount = 1
-    If workerCount > 10 Then workerCount = 10
+    If workerCount > MAX_WORKER_COUNT Then workerCount = MAX_WORKER_COUNT
     SyncWorkerIdInputs wsIn, workerCount
 
     Dim lunch1 As Date, lunch2 As Date, hasLunch2 As Boolean
@@ -878,7 +883,7 @@ Public Sub GenerateAndAppendHistory()
     baseStart = startDate + startTime
 
     Dim outRow As Long, opRow As Long, opNum As Long
-    Dim firstWorkerRow(1 To 10) As Long
+    Dim firstWorkerRow(1 To MAX_WORKER_COUNT) As Long
     Dim prevEndDT As Date, prevStartDT As Date
     outRow = 2
     opRow = 4
@@ -1190,7 +1195,7 @@ Public Sub SyncWorkerIdInputs(ByVal wsIn As Worksheet, ByVal workerCount As Long
     Dim i As Long
 
     If workerCount < 1 Then workerCount = 1
-    If workerCount > 10 Then workerCount = 10
+    If workerCount > MAX_WORKER_COUNT Then workerCount = MAX_WORKER_COUNT
 
     EnsureColorSettings wsIn
     Dim clrLocked As Long
@@ -1201,9 +1206,9 @@ Public Sub SyncWorkerIdInputs(ByVal wsIn As Worksheet, ByVal workerCount As Long
 
     wsIn.Range("D3").Value = UW(1048, 1089, 1087, 1086, 1083, 1085, 1080, 1090, 1077, 1083, 1100)
     SetRangeBoldSafe wsIn.Range("D3:E3"), True, "SyncWorkerIdInputs"
-    wsIn.Range("E4:E13").NumberFormat = "@"
+    wsIn.Range("E4:E" & CStr(3 + MAX_WORKER_COUNT)).NumberFormat = "@"
 
-    For i = 1 To 10
+    For i = 1 To MAX_WORKER_COUNT
         Dim rowNum As Long
         rowNum = 3 + i
 
@@ -1219,7 +1224,7 @@ Public Sub SyncOperationRows(ByVal wsIn As Worksheet, ByVal opCount As Long)
     On Error GoTo Cleanup
 
     If opCount < 1 Then opCount = 1
-    If opCount > 20 Then opCount = 20
+    If opCount > MAX_OPERATION_COUNT Then opCount = MAX_OPERATION_COUNT
 
     EnsureColorSettings wsIn
     Dim clrLocked As Long
@@ -1229,9 +1234,9 @@ Public Sub SyncOperationRows(ByVal wsIn As Worksheet, ByVal opCount As Long)
     ReadAllColors wsIn, clrLocked, clrEditHasColor, clrEditable, clrMrsHeader, clrMrsSub, clrMrsOrder, clrMrsOrderUnconf, clrHeader
 
     Dim firstDurUnit As String, firstType As String, firstBreakUnit As String
-    firstDurUnit = Trim$(CStr(wsIn.Cells(4, 12).Value))
-    firstType = Trim$(CStr(wsIn.Cells(4, 13).Value))
-    firstBreakUnit = Trim$(CStr(wsIn.Cells(4, 15).Value))
+    firstDurUnit = Trim$(CStr(wsIn.Cells(FIRST_OPERATION_ROW, 12).Value))
+    firstType = Trim$(CStr(wsIn.Cells(FIRST_OPERATION_ROW, 13).Value))
+    firstBreakUnit = Trim$(CStr(wsIn.Cells(FIRST_OPERATION_ROW, 15).Value))
 
     Dim i As Long, r As Long, c As Long
     Dim editCols As Variant
@@ -1240,7 +1245,7 @@ Public Sub SyncOperationRows(ByVal wsIn As Worksheet, ByVal opCount As Long)
     syncCols = Array(12, 13, 15)
 
     For i = 1 To opCount
-        r = i + 3
+        r = FIRST_OPERATION_ROW - 1 + i
         wsIn.Cells(r, 7).Value = i
         wsIn.Cells(r, 7).Font.Color = GetContrastColor(clrLocked)
         If Trim$(CStr(wsIn.Cells(r, 9).Value)) = "" Then
@@ -1291,9 +1296,9 @@ Public Sub SyncOperationRows(ByVal wsIn As Worksheet, ByVal opCount As Long)
         Next c
     Next i
 
-    If opCount + 4 <= 23 Then
+    If opCount + FIRST_OPERATION_ROW <= LAST_OPERATION_ROW Then
         Dim unusedRange As Range
-        Set unusedRange = wsIn.Range(wsIn.Cells(opCount + 4, 7), wsIn.Cells(23, 16))
+        Set unusedRange = wsIn.Range(wsIn.Cells(opCount + FIRST_OPERATION_ROW, 7), wsIn.Cells(LAST_OPERATION_ROW, 16))
         unusedRange.ClearContents
         ApplyLockedStyle unusedRange, clrLocked
         unusedRange.Borders.LineStyle = xlNone
@@ -1696,7 +1701,7 @@ Public Function NormalizeParticipantsSpec(ByVal rawText As String, ByVal maxWork
     Dim selected() As Boolean
 
     If maxWorkerCount < 1 Then maxWorkerCount = 1
-    If maxWorkerCount > 10 Then maxWorkerCount = 10
+    If maxWorkerCount > MAX_WORKER_COUNT Then maxWorkerCount = MAX_WORKER_COUNT
 
     spec = Trim$(rawText)
     spec = Replace$(spec, vbTab, "")
@@ -2448,6 +2453,124 @@ Private Function IsNumericOrder(ByVal s As String) As Boolean
     IsNumericOrder = True
 End Function
 
+Private Function NormalizeInlineSpaces(ByVal rawText As String) As String
+    Dim parts As Variant
+    Dim token As Variant
+    rawText = Replace$(rawText, vbTab, " ")
+    rawText = Trim$(rawText)
+    If rawText = "" Then Exit Function
+    parts = Split(rawText, " ")
+    For Each token In parts
+        If Len(CStr(token)) > 0 Then
+            If NormalizeInlineSpaces <> "" Then NormalizeInlineSpaces = NormalizeInlineSpaces & " "
+            NormalizeInlineSpaces = NormalizeInlineSpaces & CStr(token)
+        End If
+    Next token
+End Function
+
+Private Function AbbreviatePersonName(ByVal fullName As String) As String
+    Dim normalized As String
+    Dim parts As Variant
+    Dim i As Long
+    Dim initials As String
+    normalized = NormalizeInlineSpaces(fullName)
+    If normalized = "" Then Exit Function
+    parts = Split(normalized, " ")
+    AbbreviatePersonName = CStr(parts(0))
+    For i = 1 To UBound(parts)
+        If Len(CStr(parts(i))) > 0 Then initials = initials & Left$(CStr(parts(i)), 1) & "."
+    Next i
+    If initials <> "" Then AbbreviatePersonName = AbbreviatePersonName & " " & initials
+End Function
+
+Private Function GetBrigadeWorkerName(ByVal firstOrderKey As String, ByVal workerId As String, ByVal dictOrderW As Object) As String
+    If dictOrderW Is Nothing Then Exit Function
+    If dictOrderW.Exists(CStr(firstOrderKey)) Then
+        If dictOrderW(CStr(firstOrderKey)).Exists(CStr(workerId)) Then
+            GetBrigadeWorkerName = NormalizeInlineSpaces(CStr(dictOrderW(CStr(firstOrderKey))(CStr(workerId))))
+        End If
+    End If
+End Function
+
+Private Function BuildBrigadeMemberCaption(ByVal firstOrderKey As String, ByVal workerId As String, ByVal dictOrderW As Object, ByVal useShortName As Boolean, ByVal includeId As Boolean) As String
+    Dim workerName As String
+    workerName = GetBrigadeWorkerName(firstOrderKey, workerId, dictOrderW)
+    If useShortName Then workerName = AbbreviatePersonName(workerName)
+    workerId = Trim$(workerId)
+    If includeId Then
+        If workerName <> "" And workerId <> "" Then
+            BuildBrigadeMemberCaption = workerName & " (" & workerId & ")"
+        ElseIf workerName <> "" Then
+            BuildBrigadeMemberCaption = workerName
+        ElseIf workerId <> "" Then
+            BuildBrigadeMemberCaption = "(" & workerId & ")"
+        End If
+    Else
+        If workerName <> "" Then
+            BuildBrigadeMemberCaption = workerName
+        Else
+            BuildBrigadeMemberCaption = workerId
+        End If
+    End If
+End Function
+
+Private Function BuildBrigadeName(ByVal workerIds As Variant, ByVal firstOrderKey As String, ByVal dictOrderW As Object) As String
+    Dim i As Long
+    Dim itemText As String
+    For i = LBound(workerIds) To UBound(workerIds)
+        itemText = BuildBrigadeMemberCaption(firstOrderKey, CStr(workerIds(i)), dictOrderW, False, True)
+        If BuildBrigadeName <> "" Then BuildBrigadeName = BuildBrigadeName & ", "
+        BuildBrigadeName = BuildBrigadeName & itemText
+    Next i
+End Function
+
+Private Function BuildLimitedBrigadeListLabel(ByVal workerIds As Variant, ByVal firstOrderKey As String, ByVal dictOrderW As Object, ByVal useShortName As Boolean, ByVal includeId As Boolean) As String
+    Dim workerCount As Long
+    Dim prefix As String
+    Dim fallbackText As String
+    Dim i As Long
+    Dim shownCount As Long
+    Dim hiddenCount As Long
+    Dim itemText As String
+    Dim candidate As String
+    Dim tailText As String
+    workerCount = UBound(workerIds) - LBound(workerIds) + 1
+    fallbackText = CStr(workerCount) & " " & UW(1095, 1077, 1083, 46)
+    prefix = fallbackText & ": "
+    BuildLimitedBrigadeListLabel = prefix
+    For i = LBound(workerIds) To UBound(workerIds)
+        itemText = BuildBrigadeMemberCaption(firstOrderKey, CStr(workerIds(i)), dictOrderW, useShortName, includeId)
+        If itemText = "" Then itemText = CStr(workerIds(i))
+        If shownCount > 0 Then
+            candidate = BuildLimitedBrigadeListLabel & ", " & itemText
+        Else
+            candidate = BuildLimitedBrigadeListLabel & itemText
+        End If
+        hiddenCount = UBound(workerIds) - i
+        If hiddenCount > 0 Then tailText = " +" & CStr(hiddenCount) & " " & UW(1095, 1077, 1083, 46) Else tailText = ""
+        If Len(candidate & tailText) > MAX_DIALOG_LIST_ITEM_LEN Then Exit For
+        BuildLimitedBrigadeListLabel = candidate
+        shownCount = shownCount + 1
+    Next i
+    If shownCount = 0 Then
+        BuildLimitedBrigadeListLabel = fallbackText
+    ElseIf shownCount < workerCount Then
+        BuildLimitedBrigadeListLabel = BuildLimitedBrigadeListLabel & " +" & CStr(workerCount - shownCount) & " " & UW(1095, 1077, 1083, 46)
+    End If
+End Function
+
+Private Function BuildBrigadeListLabel(ByVal workerIds As Variant, ByVal firstOrderKey As String, ByVal dictOrderW As Object) As String
+    Dim fullName As String
+    fullName = BuildBrigadeName(workerIds, firstOrderKey, dictOrderW)
+    If Len(fullName) <= MAX_DIALOG_LIST_ITEM_LEN Then
+        BuildBrigadeListLabel = fullName
+        Exit Function
+    End If
+    BuildBrigadeListLabel = BuildLimitedBrigadeListLabel(workerIds, firstOrderKey, dictOrderW, True, True)
+    If Len(BuildBrigadeListLabel) <= MAX_DIALOG_LIST_ITEM_LEN Then Exit Function
+    BuildBrigadeListLabel = BuildLimitedBrigadeListLabel(workerIds, firstOrderKey, dictOrderW, True, False)
+End Function
+
 Public Sub LoadMRS()
     If Not ZQ() Then
         MsgBox UW(1054, 1096, 1080, 1073, 1082, 1072, 33), vbCritical
@@ -2824,6 +2947,8 @@ SkipDateRow:
     stage = "Prompt for brigades date " & CStr(d)
     Dim brigNames() As String
     ReDim brigNames(1 To brigCount)
+    Dim brigListNames() As String
+    ReDim brigListNames(1 To brigCount)
     Dim selBrig() As Boolean
     ReDim selBrig(1 To brigCount)
     
@@ -2835,17 +2960,8 @@ SkipDateRow:
         tmpWorkerIds = Split(tmpBrigKey, ",")
         Dim tmpFirstOrd As Variant
         For Each tmpFirstOrd In dictBrigades(tmpBrigKey).Keys: Exit For: Next
-        Dim tmpWStr As String: tmpWStr = ""
-        Dim twi As Long
-        For twi = 0 To UBound(tmpWorkerIds)
-            If twi > 0 Then tmpWStr = tmpWStr & ", "
-            Dim tmpWName As String: tmpWName = ""
-            If dictOrderW(CStr(tmpFirstOrd)).Exists(CStr(tmpWorkerIds(twi))) Then
-                tmpWName = dictOrderW(CStr(tmpFirstOrd))(CStr(tmpWorkerIds(twi)))
-            End If
-            tmpWStr = tmpWStr & tmpWName & " (" & tmpWorkerIds(twi) & ")"
-        Next twi
-        brigNames(bDisp) = tmpWStr
+        brigNames(bDisp) = BuildBrigadeName(tmpWorkerIds, CStr(tmpFirstOrd), dictOrderW)
+        brigListNames(bDisp) = BuildBrigadeListLabel(tmpWorkerIds, CStr(tmpFirstOrd), dictOrderW)
     Next bDisp
     
     If brigCount = 1 Then
@@ -2885,7 +3001,7 @@ SkipDateRow:
         btnClearAll.OnAction = "ClearAllBrigades"
         
         For bDisp = 1 To brigCount
-            lb.AddItem brigNames(bDisp)
+            lb.AddItem brigListNames(bDisp)
         Next bDisp
         
         Application.ScreenUpdating = True
@@ -2947,7 +3063,7 @@ SkipDateRow:
         wsMRS.Cells(outRow, 2).HorizontalAlignment = -4108
         wsMRS.Cells(outRow, 2).Interior.Color = clrMrsSub
         wsMRS.Cells(outRow, 2).WrapText = True
-        wsMRS.Rows(outRow).RowHeight = 60
+        wsMRS.Rows(outRow).RowHeight = 120
 
         Dim ordInBrig As Long
         ordInBrig = dictBrigades(curBrigKey).Count
@@ -3535,6 +3651,10 @@ $inputSheetCode = @'
 Option Explicit
 
 Private mColorSignature As String
+Private Const MAX_OPERATION_COUNT As Long = 20
+Private Const FIRST_OPERATION_ROW As Long = 4
+Private Const LAST_OPERATION_ROW As Long = FIRST_OPERATION_ROW + MAX_OPERATION_COUNT - 1
+Private Const MAX_WORKER_COUNT As Long = 20
 
 Private Sub Worksheet_Activate()
     mColorSignature = BuildColorSettingsSignature(Me)
@@ -3574,7 +3694,7 @@ Private Sub Worksheet_Change(ByVal Target As Range)
         Dim opCount As Long
         opCount = CLng(Val(Me.Range("B8").Value))
         If opCount < 1 Then opCount = 1
-        If opCount > 20 Then opCount = 20
+        If opCount > MAX_OPERATION_COUNT Then opCount = MAX_OPERATION_COUNT
         Me.Range("B8").Value = opCount
         SyncOperationRows Me, opCount
     End If
@@ -3583,15 +3703,15 @@ Private Sub Worksheet_Change(ByVal Target As Range)
         Dim workerCount As Long
         workerCount = CLng(Val(Me.Range("B9").Value))
         If workerCount < 1 Then workerCount = 1
-        If workerCount > 10 Then workerCount = 10
+        If workerCount > MAX_WORKER_COUNT Then workerCount = MAX_WORKER_COUNT
         Me.Range("B9").Value = workerCount
         SyncWorkerIdInputs Me, workerCount
 
-        Set participantRange = Me.Range("P4:P23")
+        Set participantRange = Me.Range("P" & FIRST_OPERATION_ROW & ":P" & LAST_OPERATION_ROW)
     End If
 
     Dim workerRange As Range, cell As Range
-    Set workerRange = Intersect(Target, Me.Range("E4:E13"))
+    Set workerRange = Intersect(Target, Me.Range("E4:E23"))
     If Not workerRange Is Nothing Then
         For Each cell In workerRange.Cells
             SanitizeWorkerIdCell cell
@@ -3611,7 +3731,7 @@ Private Sub Worksheet_Change(ByVal Target As Range)
     End If
 
     Dim hRange As Range, hCell As Range
-    Set hRange = Intersect(Target, Me.Range("H4:H23"))
+    Set hRange = Intersect(Target, Me.Range("H" & FIRST_OPERATION_ROW & ":H" & LAST_OPERATION_ROW))
     If Not hRange Is Nothing Then
         For Each hCell In hRange.Cells
             Dim hDigits As String
@@ -3627,7 +3747,7 @@ Private Sub Worksheet_Change(ByVal Target As Range)
     End If
 
     Dim jRange As Range, jCell As Range
-    Set jRange = Intersect(Target, Me.Range("J4:J23"))
+    Set jRange = Intersect(Target, Me.Range("J" & FIRST_OPERATION_ROW & ":J" & LAST_OPERATION_ROW))
     If Not jRange Is Nothing Then
         For Each jCell In jRange.Cells
             Dim rawJ As String
@@ -3640,7 +3760,7 @@ Private Sub Worksheet_Change(ByVal Target As Range)
     End If
 
     Dim kmRange As Range, kmCell As Range
-    Set kmRange = Intersect(Target, Me.Range("K4:K23,N4:N23"))
+    Set kmRange = Intersect(Target, Me.Range("K" & FIRST_OPERATION_ROW & ":K" & LAST_OPERATION_ROW & ",N" & FIRST_OPERATION_ROW & ":N" & LAST_OPERATION_ROW))
     If Not kmRange Is Nothing Then
         For Each kmCell In kmRange.Cells
             Dim cleanedKM As String
@@ -3670,16 +3790,16 @@ Private Sub Worksheet_Change(ByVal Target As Range)
     End If
 
     If participantRange Is Nothing Then
-        Set participantRange = Intersect(Target, Me.Range("P4:P23"))
-    ElseIf Not Intersect(Target, Me.Range("P4:P23")) Is Nothing Then
-        Set participantRange = Union(participantRange, Intersect(Target, Me.Range("P4:P23")))
+        Set participantRange = Intersect(Target, Me.Range("P" & FIRST_OPERATION_ROW & ":P" & LAST_OPERATION_ROW))
+    ElseIf Not Intersect(Target, Me.Range("P" & FIRST_OPERATION_ROW & ":P" & LAST_OPERATION_ROW)) Is Nothing Then
+        Set participantRange = Union(participantRange, Intersect(Target, Me.Range("P" & FIRST_OPERATION_ROW & ":P" & LAST_OPERATION_ROW)))
     End If
 
     If Not participantRange Is Nothing Then
         Dim maxParticipantWorkerCount As Long
         maxParticipantWorkerCount = CLng(Val(Me.Range("B9").Value))
         If maxParticipantWorkerCount < 1 Then maxParticipantWorkerCount = 1
-        If maxParticipantWorkerCount > 10 Then maxParticipantWorkerCount = 10
+        If maxParticipantWorkerCount > MAX_WORKER_COUNT Then maxParticipantWorkerCount = MAX_WORKER_COUNT
 
         participantRange.NumberFormat = "@"
         For Each participantCell In participantRange.Cells
@@ -3687,15 +3807,15 @@ Private Sub Worksheet_Change(ByVal Target As Range)
         Next participantCell
     End If
 
-    If Not Intersect(Target, Me.Range("L4")) Is Nothing Then
+    If Not Intersect(Target, Me.Range("L" & FIRST_OPERATION_ROW)) Is Nothing Then
         syncOpsFromSelectors = True
     End If
 
-    If Not Intersect(Target, Me.Range("M4")) Is Nothing Then
+    If Not Intersect(Target, Me.Range("M" & FIRST_OPERATION_ROW)) Is Nothing Then
         syncOpsFromSelectors = True
     End If
 
-    If Not Intersect(Target, Me.Range("O4")) Is Nothing Then
+    If Not Intersect(Target, Me.Range("O" & FIRST_OPERATION_ROW)) Is Nothing Then
         syncOpsFromSelectors = True
     End If
 
@@ -3703,7 +3823,7 @@ Private Sub Worksheet_Change(ByVal Target As Range)
         Dim currentOpCount As Long
         currentOpCount = CLng(Val(Me.Range("B8").Value))
         If currentOpCount < 1 Then currentOpCount = 1
-        If currentOpCount > 20 Then currentOpCount = 20
+        If currentOpCount > MAX_OPERATION_COUNT Then currentOpCount = MAX_OPERATION_COUNT
         SyncOperationRows Me, currentOpCount
     End If
 
@@ -3893,6 +4013,9 @@ try {
     $wsInput.Range("B16").Value2 = ""
     $wsInput.Range("B17").Value2 = ""
     $wsInput.Range("B16:B17").NumberFormat = "@"
+    $maxOperationCount = 20
+    $firstOperationRow = 4
+    $lastOperationRow = $firstOperationRow + $maxOperationCount - 1
 
     $wsInput.Range("D3").Value = (RU @(1048,1089,1087,1086,1083,1085,1080,1090,1077,1083,1100))
     $wsInput.Range("E3").Value = (RU @(8470))
@@ -3900,8 +4023,8 @@ try {
 
     $activeWorkerCount = [int]$wsInput.Range("B9").Value2
     if ($activeWorkerCount -lt 1) { $activeWorkerCount = 1 }
-    if ($activeWorkerCount -gt 10) { $activeWorkerCount = 10 }
-    foreach ($i in 1..10) {
+    if ($activeWorkerCount -gt 20) { $activeWorkerCount = 20 }
+    foreach ($i in 1..20) {
         $row = 3 + $i
         $wsInput.Cells.Item($row, 4).Value = ((RU @(1048,1089,1087,1086,1083,1085,1080,1090,1077,1083,1100)) + " " + $i)
         $wsInput.Cells.Item($row, 5).NumberFormat = "00000000"
@@ -3930,30 +4053,30 @@ try {
     $wsInput.Range("P3").Value = (RU @(1059,1095,1072,1089,1090,1085,1080,1082,1080))
     $wsInput.Range("G3:P3").Font.Bold = $true
 
-    $wsInput.Range("G4").Value2 = 1
-    $wsInput.Range("I4").Value = (RU @(1054,1087,1077,1088,1072,1094,1080,1103,32,49))
-    $wsInput.Range("K4").Value2 = 0
-    $wsInput.Range("L4").Value = (RU @(1084,1080,1085))
-    $wsInput.Range("M4").Value = (RU @(1054,1073,1097,1077,1077))
-    $wsInput.Range("O4").Value = (RU @(1084,1080,1085))
+    $wsInput.Range(("G{0}" -f $firstOperationRow)).Value2 = 1
+    $wsInput.Range(("I{0}" -f $firstOperationRow)).Value = (RU @(1054,1087,1077,1088,1072,1094,1080,1103,32,49))
+    $wsInput.Range(("K{0}" -f $firstOperationRow)).Value2 = 0
+    $wsInput.Range(("L{0}" -f $firstOperationRow)).Value = (RU @(1084,1080,1085))
+    $wsInput.Range(("M{0}" -f $firstOperationRow)).Value = (RU @(1054,1073,1097,1077,1077))
+    $wsInput.Range(("O{0}" -f $firstOperationRow)).Value = (RU @(1084,1080,1085))
 
-    $wsInput.Range("G5").Value2 = 2
-    $wsInput.Range("I5").Value = (RU @(1054,1087,1077,1088,1072,1094,1080,1103,32,50))
-    $wsInput.Range("K5").Value2 = 0
-    $wsInput.Range("L5").Value = (RU @(1084,1080,1085))
-    $wsInput.Range("M5").Value = (RU @(1054,1073,1097,1077,1077))
-    $wsInput.Range("O5").Value = (RU @(1084,1080,1085))
+    $wsInput.Range(("G{0}" -f ($firstOperationRow + 1))).Value2 = 2
+    $wsInput.Range(("I{0}" -f ($firstOperationRow + 1))).Value = (RU @(1054,1087,1077,1088,1072,1094,1080,1103,32,50))
+    $wsInput.Range(("K{0}" -f ($firstOperationRow + 1))).Value2 = 0
+    $wsInput.Range(("L{0}" -f ($firstOperationRow + 1))).Value = (RU @(1084,1080,1085))
+    $wsInput.Range(("M{0}" -f ($firstOperationRow + 1))).Value = (RU @(1054,1073,1097,1077,1077))
+    $wsInput.Range(("O{0}" -f ($firstOperationRow + 1))).Value = (RU @(1084,1080,1085))
 
     # Default values: Пауза=0, Участники=пусто for active operations only
-    for ($r = 4; $r -le 5; $r++) {
+    for ($r = $firstOperationRow; $r -le ($firstOperationRow + 1); $r++) {
         $wsInput.Cells.Item($r, 14).Value2 = 0   # N = Пауза
         $wsInput.Cells.Item($r, 16).Value2 = ""  # P = Участники
     }
 
     # K4:K23, N4:N23: text format for safe input (NormalizeDecimal in VBA)
-    $wsInput.Range("K4:K23").NumberFormat = "@"
-    $wsInput.Range("N4:N23").NumberFormat = "@"
-    $wsInput.Range("P4:P23").NumberFormat = "@"
+    $wsInput.Range(("K{0}:K{1}" -f $firstOperationRow, $lastOperationRow)).NumberFormat = "@"
+    $wsInput.Range(("N{0}:N{1}" -f $firstOperationRow, $lastOperationRow)).NumberFormat = "@"
+    $wsInput.Range(("P{0}:P{1}" -f $firstOperationRow, $lastOperationRow)).NumberFormat = "@"
 
     $wsInput.Columns("A:A").ColumnWidth = 25
     $wsInput.Columns("B:B").ColumnWidth = 40
@@ -3995,7 +4118,7 @@ try {
     # --- Clear color on always-editable cells ---
     $alwaysEditable = @(
         "B3:B17",
-        "L4","M4","O4"
+        ("L{0}" -f $firstOperationRow), ("M{0}" -f $firstOperationRow), ("O{0}" -f $firstOperationRow)
     )
     foreach ($addr in $alwaysEditable) {
         $wsInput.Range($addr).Interior.Pattern = -4142  # xlNone
@@ -4005,8 +4128,8 @@ try {
 
     # --- Workers: unlock only active rows (default 2) ---
     $defWorkers = 2
-    for ($i = 1; $i -le 10; $i++) {
-        $row = $i + 3
+    for ($i = 1; $i -le $maxOperationCount; $i++) {
+        $row = $firstOperationRow - 1 + $i
         $wsInput.Cells.Item($row, 4).Locked = $true
         if ($i -le $defWorkers) {
             $wsInput.Cells.Item($row, 5).Interior.Pattern = -4142
@@ -4059,15 +4182,15 @@ try {
     }
 
     # Lock N4 (pause for first op) — no history in fresh file
-    $wsInput.Range("N4").Locked = $true
-    $wsInput.Range("N4").Interior.Color = $lightRed
+    $wsInput.Range(("N{0}" -f $firstOperationRow)).Locked = $true
+    $wsInput.Range(("N{0}" -f $firstOperationRow)).Interior.Color = $lightRed
 
     # --- L5:L23, M5:M23, O5:O23: synced values ---
     $minText = RU @(1084,1080,1085)
     $typeText = RU @(1054,1073,1097,1077,1077)
-    $wsInput.Range("L5:L23").Value = $minText
-    $wsInput.Range("M5:M23").Value = $typeText
-    $wsInput.Range("O5:O23").Value = $minText
+    $wsInput.Range(("L{0}:L{1}" -f ($firstOperationRow + 1), $lastOperationRow)).Value = $minText
+    $wsInput.Range(("M{0}:M{1}" -f ($firstOperationRow + 1), $lastOperationRow)).Value = $typeText
+    $wsInput.Range(("O{0}:O{1}" -f ($firstOperationRow + 1), $lastOperationRow)).Value = $minText
 
     # --- Data validation with error messages ---
     $errTitle = RU @(1054,1096,1080,1073,1082,1072,32,1074,1074,1086,1076,1072)  # "Ошибка ввода"
@@ -4105,15 +4228,15 @@ try {
 
     # B8: integer, 1-20 (operations)
     $wsInput.Range("B8").Validation.Delete()
-    $wsInput.Range("B8").Validation.Add(1, 1, 1, "1", "20") | Out-Null
+    $wsInput.Range("B8").Validation.Add(1, 1, 1, "1", $maxOperationCount.ToString()) | Out-Null
     $wsInput.Range("B8").Validation.ErrorTitle = $errTitle
     $wsInput.Range("B8").Validation.ErrorMessage = (RU @(1062,1077,1083,1086,1077,32,1095,1080,1089,1083,1086,32,1086,1090,32,49,32,1076,1086,32,50,48))  # "Целое число от 1 до 20"
 
-    # B9: integer, 1-10 (workers)
+    # B9: integer, 1-20 (workers)
     $wsInput.Range("B9").Validation.Delete()
-    $wsInput.Range("B9").Validation.Add(1, 1, 1, "1", "10") | Out-Null
+    $wsInput.Range("B9").Validation.Add(1, 1, 1, "1", "20") | Out-Null
     $wsInput.Range("B9").Validation.ErrorTitle = $errTitle
-    $wsInput.Range("B9").Validation.ErrorMessage = (RU @(1062,1077,1083,1086,1077,32,1095,1080,1089,1083,1086,32,1086,1090,32,49,32,1076,1086,32,49,48))  # "Целое число от 1 до 10"
+    $wsInput.Range("B9").Validation.ErrorMessage = (RU @(1062,1077,1083,1086,1077,32,1095,1080,1089,1083,1086,32,1086,1090,32,49,32,1076,1086,32,50,48))  # "Целое число от 1 до 20"
 
     # B12: integer, 1-600
     $wsInput.Range("B12").Validation.Delete()
@@ -4139,33 +4262,33 @@ try {
         $wsInput.Range($cell).Validation.ErrorMessage = (RU @(1052,1072,1082,1089,1080,1084,1091,1084,32,50,48,32,1089,1080,1084,1074,1086,1083,1086,1074))  # "Максимум 20 символов"
     }
 
-    # E4:E13: integer, 8 digits
-    $wsInput.Range("E4:E13").Validation.Delete()
-    $wsInput.Range("E4:E13").Validation.Add(1, 1, 1, "0", "99999999") | Out-Null
-    $wsInput.Range("E4:E13").Validation.IgnoreBlank = $true
-    $wsInput.Range("E4:E13").Validation.ErrorTitle = $errTitle
-    $wsInput.Range("E4:E13").Validation.ErrorMessage = (RU @(1052,1072,1082,1089,1080,1084,1091,1084,32,56,32,1094,1080,1092,1088))  # "Максимум 8 цифр"
+    # E4:E23: integer, 8 digits
+    $wsInput.Range("E4:E23").Validation.Delete()
+    $wsInput.Range("E4:E23").Validation.Add(1, 1, 1, "0", "99999999") | Out-Null
+    $wsInput.Range("E4:E23").Validation.IgnoreBlank = $true
+    $wsInput.Range("E4:E23").Validation.ErrorTitle = $errTitle
+    $wsInput.Range("E4:E23").Validation.ErrorMessage = (RU @(1052,1072,1082,1089,1080,1084,1091,1084,32,56,32,1094,1080,1092,1088))  # "Максимум 8 цифр"
 
     # H4:H23: integer, max 8 digits (VBA normalizes)
-    $wsInput.Range("H4:H23").NumberFormat = "00000000"
-    $wsInput.Range("H4:H23").Validation.Delete()
-    $wsInput.Range("H4:H23").Validation.Add(1, 1, 1, "0", "99999999") | Out-Null
-    $wsInput.Range("H4:H23").Validation.IgnoreBlank = $true
-    $wsInput.Range("H4:H23").Validation.ErrorTitle = $errTitle
-    $wsInput.Range("H4:H23").Validation.ErrorMessage = (RU @(1052,1072,1082,1089,1080,1084,1091,1084,32,56,32,1094,1080,1092,1088))  # "Максимум 8 цифр"
+    $wsInput.Range(("H{0}:H{1}" -f $firstOperationRow, $lastOperationRow)).NumberFormat = "00000000"
+    $wsInput.Range(("H{0}:H{1}" -f $firstOperationRow, $lastOperationRow)).Validation.Delete()
+    $wsInput.Range(("H{0}:H{1}" -f $firstOperationRow, $lastOperationRow)).Validation.Add(1, 1, 1, "0", "99999999") | Out-Null
+    $wsInput.Range(("H{0}:H{1}" -f $firstOperationRow, $lastOperationRow)).Validation.IgnoreBlank = $true
+    $wsInput.Range(("H{0}:H{1}" -f $firstOperationRow, $lastOperationRow)).Validation.ErrorTitle = $errTitle
+    $wsInput.Range(("H{0}:H{1}" -f $firstOperationRow, $lastOperationRow)).Validation.ErrorMessage = (RU @(1052,1072,1082,1089,1080,1084,1091,1084,32,56,32,1094,1080,1092,1088))  # "Максимум 8 цифр"
 
     # I4:I23: text, max 100 chars
-    $wsInput.Range("I4:I23").Validation.Delete()
-    $wsInput.Range("I4:I23").Validation.Add(6, 1, 8, "100") | Out-Null
-    $wsInput.Range("I4:I23").Validation.IgnoreBlank = $true
-    $wsInput.Range("I4:I23").Validation.ErrorTitle = $errTitle
-    $wsInput.Range("I4:I23").Validation.ErrorMessage = (RU @(1052,1072,1082,1089,1080,1084,1091,1084,32,49,48,48,32,1089,1080,1084,1074,1086,1083,1086,1074))
+    $wsInput.Range(("I{0}:I{1}" -f $firstOperationRow, $lastOperationRow)).Validation.Delete()
+    $wsInput.Range(("I{0}:I{1}" -f $firstOperationRow, $lastOperationRow)).Validation.Add(6, 1, 8, "100") | Out-Null
+    $wsInput.Range(("I{0}:I{1}" -f $firstOperationRow, $lastOperationRow)).Validation.IgnoreBlank = $true
+    $wsInput.Range(("I{0}:I{1}" -f $firstOperationRow, $lastOperationRow)).Validation.ErrorTitle = $errTitle
+    $wsInput.Range(("I{0}:I{1}" -f $firstOperationRow, $lastOperationRow)).Validation.ErrorMessage = (RU @(1052,1072,1082,1089,1080,1084,1091,1084,32,49,48,48,32,1089,1080,1084,1074,1086,1083,1086,1074))
 
     # J4:J23: decimal, 0-999999.99 (Data Validation)
     $decSep = [string]$excel.International(3)
     $maxDec = "999999" + $decSep + "99"
     $decErrMsg = (RU @(1063,1080,1089,1083,1086,32,1086,1090,32,48,32,1076,1086,32,57,57,57,57,57,57,44,57,57))  # "Число от 0 до 999999,99"
-    foreach ($rng in @("J4:J23")) {
+    foreach ($rng in @(("J{0}:J{1}" -f $firstOperationRow, $lastOperationRow))) {
         $wsInput.Range($rng).Validation.Delete()
         $wsInput.Range($rng).Validation.Add(2, 1, 1, "0", $maxDec) | Out-Null
         $wsInput.Range($rng).Validation.IgnoreBlank = $true
@@ -4173,7 +4296,7 @@ try {
         $wsInput.Range($rng).Validation.ErrorMessage = $decErrMsg
     }
     # K4:K23, N4:N23: sanitized in VBA after input
-    foreach ($rng in @("K4:K23","N4:N23")) {
+    foreach ($rng in @(("K{0}:K{1}" -f $firstOperationRow, $lastOperationRow), ("N{0}:N{1}" -f $firstOperationRow, $lastOperationRow))) {
         $wsInput.Range($rng).Validation.Delete()
     }
 
@@ -4181,7 +4304,7 @@ try {
     $listSep = $excel.International(5)
     $unitList = (RU @(1084,1080,1085)) + $listSep + (RU @(1095,1072,1089))
     $unitErrMsg = (RU @(1042,1099,1073,1077,1088,1080,1090,1077,32,1084,1080,1085,32,1080,1083,1080,32,1095,1072,1089))  # "Выберите мин или час"
-    foreach ($rng in @("L4","O4")) {
+    foreach ($rng in @(("L{0}" -f $firstOperationRow), ("O{0}" -f $firstOperationRow))) {
         $wsInput.Range($rng).Validation.Delete()
         $wsInput.Range($rng).Validation.Add(3, 1, 1, $unitList) | Out-Null
         $wsInput.Range($rng).Validation.IgnoreBlank = $true
@@ -4192,15 +4315,15 @@ try {
 
     $typeList = (RU @(1054,1073,1097,1077,1077)) + $listSep + (RU @(1053,1072,32,1050,1072,1078,1076,1086,1075,1086))
     $typeErrMsg = (RU @(1042,1099,1073,1077,1088,1080,1090,1077,32,1090,1080,1087,32,1079,1072,1076,1072,1085,1080,1103))
-    $wsInput.Range("M4").Validation.Delete()
-    $wsInput.Range("M4").Validation.Add(3, 1, 1, $typeList) | Out-Null
-    $wsInput.Range("M4").Validation.IgnoreBlank = $true
-    $wsInput.Range("M4").Validation.InCellDropdown = $true
-    $wsInput.Range("M4").Validation.ErrorTitle = $errTitle
-    $wsInput.Range("M4").Validation.ErrorMessage = $typeErrMsg
+    $wsInput.Range(("M{0}" -f $firstOperationRow)).Validation.Delete()
+    $wsInput.Range(("M{0}" -f $firstOperationRow)).Validation.Add(3, 1, 1, $typeList) | Out-Null
+    $wsInput.Range(("M{0}" -f $firstOperationRow)).Validation.IgnoreBlank = $true
+    $wsInput.Range(("M{0}" -f $firstOperationRow)).Validation.InCellDropdown = $true
+    $wsInput.Range(("M{0}" -f $firstOperationRow)).Validation.ErrorTitle = $errTitle
+    $wsInput.Range(("M{0}" -f $firstOperationRow)).Validation.ErrorMessage = $typeErrMsg
 
     # P4:P23: participants spec (sanitized in VBA after input)
-    $wsInput.Range("P4:P23").Validation.Delete()
+    $wsInput.Range(("P{0}:P{1}" -f $firstOperationRow, $lastOperationRow)).Validation.Delete()
 
     $wsResult.Range("A1").Value2 = ""
     $wsResult.Range("B1").Value = (RU @(8470))

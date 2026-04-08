@@ -65,6 +65,14 @@ Private Const CLR_DEF_MRS_SUB As Long = 16768200
 Private Const CLR_DEF_MRS_ORDER As Long = 13167560
 Private Const CLR_DEF_MRS_ORDER_UNCONF As Long = 14277081
 Private Const CLR_DEF_HEADER As Long = 13167560
+' Рабочий лимит длины элемента DialogSheet.ListBox, чтобы AddItem не падал на длинных строках.
+Private Const MAX_DIALOG_LIST_ITEM_LEN As Long = 240
+' Единый предел количества операций и границы их блока на листе ввода.
+Private Const MAX_OPERATION_COUNT As Long = 20
+Private Const FIRST_OPERATION_ROW As Long = 4
+Private Const LAST_OPERATION_ROW As Long = FIRST_OPERATION_ROW + MAX_OPERATION_COUNT - 1
+' Единый предел количества исполнителей на листе ввода и в связанных проверках.
+Private Const MAX_WORKER_COUNT As Long = 20
 
 ' ===========================================================================
 ' ReadCellColor
@@ -645,12 +653,12 @@ Private Sub RefreshInputSheetColors(ByVal wsIn As Worksheet, ByVal wsHist As Wor
 
     workerCount = CLng(val(wsIn.Range("B9").Value))
     If workerCount < 1 Then workerCount = 1
-    If workerCount > 10 Then workerCount = 10
+    If workerCount > MAX_WORKER_COUNT Then workerCount = MAX_WORKER_COUNT
     SyncWorkerIdInputs wsIn, workerCount
 
     opCount = CLng(val(wsIn.Range("B8").Value))
     If opCount < 1 Then opCount = 1
-    If opCount > 20 Then opCount = 20
+    If opCount > MAX_OPERATION_COUNT Then opCount = MAX_OPERATION_COUNT
     SyncOperationRows wsIn, opCount
 
     SyncPauseInputCell wsIn, wsHist, clrLocked, clrEditHasColor, clrEditable
@@ -1458,7 +1466,7 @@ Public Sub GenerateAndAppendHistory()
     Dim workerCount As Long
     workerCount = CLng(val(wsIn.Range("B9").Value))
     If workerCount < 1 Then workerCount = 1
-    If workerCount > 10 Then workerCount = 10
+    If workerCount > MAX_WORKER_COUNT Then workerCount = MAX_WORKER_COUNT
     SyncWorkerIdInputs wsIn, workerCount
 
     Dim lunch1 As Date, lunch2 As Date, hasLunch2 As Boolean
@@ -1481,7 +1489,7 @@ Public Sub GenerateAndAppendHistory()
     baseStart = startDate + startTime
 
     Dim outRow As Long, opRow As Long, opNum As Long
-    Dim firstWorkerRow(1 To 10) As Long
+    Dim firstWorkerRow(1 To MAX_WORKER_COUNT) As Long
     Dim prevEndDT As Date, prevStartDT As Date
     outRow = 2
     opRow = 4
@@ -1884,7 +1892,7 @@ Public Sub SyncWorkerIdInputs(ByVal wsIn As Worksheet, ByVal workerCount As Long
     Dim i As Long
 
     If workerCount < 1 Then workerCount = 1
-    If workerCount > 10 Then workerCount = 10
+    If workerCount > MAX_WORKER_COUNT Then workerCount = MAX_WORKER_COUNT
 
     EnsureColorSettings wsIn
     Dim clrLocked As Long
@@ -1895,9 +1903,9 @@ Public Sub SyncWorkerIdInputs(ByVal wsIn As Worksheet, ByVal workerCount As Long
 
     wsIn.Range("D3").Value = UW(1048, 1089, 1087, 1086, 1083, 1085, 1080, 1090, 1077, 1083, 1100)
     SetRangeBoldSafe wsIn.Range("D3:E3"), True, "SyncWorkerIdInputs"
-    wsIn.Range("E4:E13").NumberFormat = "@"
+    wsIn.Range("E4:E" & CStr(3 + MAX_WORKER_COUNT)).NumberFormat = "@"
 
-    For i = 1 To 10
+    For i = 1 To MAX_WORKER_COUNT
         Dim rowNum As Long
         rowNum = 3 + i
 
@@ -1913,7 +1921,7 @@ End Sub
 '   Приводит блок ввода операций к нужному количеству активных строк.
 '   Это одна из ключевых процедур динамического интерфейса листа "Ввод".
 ' Основные действия:
-'   - Нормализует допустимое число операций в диапазон 1..20.
+'   - Нормализует допустимое число операций в диапазон 1..MAX_OPERATION_COUNT.
 '   - Считывает текущие цветовые настройки и временно отключает события Excel.
 '   - Показывает нужное число строк операций и скрывает лишние.
 '   - Подставляет стандартные значения в пустые ячейки операций.
@@ -1930,7 +1938,7 @@ Public Sub SyncOperationRows(ByVal wsIn As Worksheet, ByVal opCount As Long)
     On Error GoTo Cleanup
 
     If opCount < 1 Then opCount = 1
-    If opCount > 20 Then opCount = 20
+    If opCount > MAX_OPERATION_COUNT Then opCount = MAX_OPERATION_COUNT
 
     EnsureColorSettings wsIn
     Dim clrLocked As Long
@@ -1940,9 +1948,9 @@ Public Sub SyncOperationRows(ByVal wsIn As Worksheet, ByVal opCount As Long)
     ReadAllColors wsIn, clrLocked, clrEditHasColor, clrEditable, clrMrsHeader, clrMrsSub, clrMrsOrder, clrMrsOrderUnconf, clrHeader
 
     Dim firstDurUnit As String, firstType As String, firstBreakUnit As String
-    firstDurUnit = Trim$(CStr(wsIn.Cells(4, 12).Value))
-    firstType = Trim$(CStr(wsIn.Cells(4, 13).Value))
-    firstBreakUnit = Trim$(CStr(wsIn.Cells(4, 15).Value))
+    firstDurUnit = Trim$(CStr(wsIn.Cells(FIRST_OPERATION_ROW, 12).Value))
+    firstType = Trim$(CStr(wsIn.Cells(FIRST_OPERATION_ROW, 13).Value))
+    firstBreakUnit = Trim$(CStr(wsIn.Cells(FIRST_OPERATION_ROW, 15).Value))
 
     Dim i As Long, r As Long, c As Long
     Dim editCols As Variant
@@ -1951,7 +1959,7 @@ Public Sub SyncOperationRows(ByVal wsIn As Worksheet, ByVal opCount As Long)
     syncCols = Array(12, 13, 15)
 
     For i = 1 To opCount
-        r = i + 3
+        r = FIRST_OPERATION_ROW - 1 + i
         wsIn.Cells(r, 7).Value = i
         wsIn.Cells(r, 7).Font.Color = GetContrastColor(clrLocked)
         If Trim$(CStr(wsIn.Cells(r, 9).Value)) = "" Then
@@ -2002,9 +2010,9 @@ Public Sub SyncOperationRows(ByVal wsIn As Worksheet, ByVal opCount As Long)
         Next c
     Next i
 
-    If opCount + 4 <= 23 Then
+    If opCount + FIRST_OPERATION_ROW <= LAST_OPERATION_ROW Then
         Dim unusedRange As Range
-        Set unusedRange = wsIn.Range(wsIn.Cells(opCount + 4, 7), wsIn.Cells(23, 16))
+        Set unusedRange = wsIn.Range(wsIn.Cells(opCount + FIRST_OPERATION_ROW, 7), wsIn.Cells(LAST_OPERATION_ROW, 16))
         unusedRange.ClearContents
         ApplyLockedStyle unusedRange, clrLocked
         unusedRange.Borders.LineStyle = xlNone
@@ -2740,7 +2748,7 @@ Public Function NormalizeParticipantsSpec(ByVal rawText As String, ByVal maxWork
     Dim selected() As Boolean
 
     If maxWorkerCount < 1 Then maxWorkerCount = 1
-    If maxWorkerCount > 10 Then maxWorkerCount = 10
+    If maxWorkerCount > MAX_WORKER_COUNT Then maxWorkerCount = MAX_WORKER_COUNT
 
     spec = Trim$(rawText)
     spec = Replace$(spec, vbTab, "")
@@ -3771,6 +3779,244 @@ Private Function IsNumericOrder(ByVal s As String) As Boolean
 End Function
 
 ' ===========================================================================
+' NormalizeInlineSpaces
+' ===========================================================================
+' Назначение:
+'   Нормализует пробелы внутри произвольной строки.
+'   Используется при подготовке имён сотрудников перед построением полного
+'   и сокращённого отображения бригады.
+' Основные действия:
+'   - Заменяет табы пробелами.
+'   - Убирает пробелы по краям.
+'   - Сжимает повторяющиеся внутренние пробелы до одного.
+' Параметры:
+'   rawText - исходная строка.
+' Возвращаемое значение:
+'   Строка с нормализованными пробелами.
+Private Function NormalizeInlineSpaces(ByVal rawText As String) As String
+    Dim parts As Variant
+    Dim token As Variant
+    rawText = Replace$(rawText, vbTab, " ")
+    rawText = Trim$(rawText)
+    If rawText = "" Then Exit Function
+    parts = Split(rawText, " ")
+    For Each token In parts
+        If Len(CStr(token)) > 0 Then
+            If NormalizeInlineSpaces <> "" Then NormalizeInlineSpaces = NormalizeInlineSpaces & " "
+            NormalizeInlineSpaces = NormalizeInlineSpaces & CStr(token)
+        End If
+    Next token
+End Function
+
+' ===========================================================================
+' AbbreviatePersonName
+' ===========================================================================
+' Назначение:
+'   Преобразует полное ФИО в компактный формат "Фамилия И.О.".
+'   Это основа для сокращённого label в списке выбора бригад.
+' Основные действия:
+'   - Нормализует пробелы в исходном имени.
+'   - Берёт первую часть как фамилию.
+'   - Остальные части превращает в инициалы.
+' Параметры:
+'   fullName - полное имя сотрудника.
+' Возвращаемое значение:
+'   Сокращённое имя либо пустая строка, если исходное имя пустое.
+Private Function AbbreviatePersonName(ByVal fullName As String) As String
+    Dim normalized As String
+    Dim parts As Variant
+    Dim i As Long
+    Dim initials As String
+    normalized = NormalizeInlineSpaces(fullName)
+    If normalized = "" Then Exit Function
+    parts = Split(normalized, " ")
+    AbbreviatePersonName = CStr(parts(0))
+    For i = 1 To UBound(parts)
+        If Len(CStr(parts(i))) > 0 Then initials = initials & Left$(CStr(parts(i)), 1) & "."
+    Next i
+    If initials <> "" Then AbbreviatePersonName = AbbreviatePersonName & " " & initials
+End Function
+
+' ===========================================================================
+' GetBrigadeWorkerName
+' ===========================================================================
+' Назначение:
+'   Извлекает имя сотрудника из словаря order -> workerId -> workerName.
+'   Helper нужен, чтобы центрально получать одно и то же имя для полного
+'   заголовка бригады и для укороченного label списка.
+' Основные действия:
+'   - Проверяет наличие словаря заказов.
+'   - Проверяет наличие конкретного заказа и сотрудника внутри него.
+'   - Возвращает нормализованное имя сотрудника.
+' Параметры:
+'   firstOrderKey - заказ, из которого берётся эталонный состав.
+'   workerId - табельный номер сотрудника.
+'   dictOrderW - словарь заказов и сотрудников.
+' Возвращаемое значение:
+'   Имя сотрудника либо пустая строка, если запись не найдена.
+Private Function GetBrigadeWorkerName(ByVal firstOrderKey As String, ByVal workerId As String, ByVal dictOrderW As Object) As String
+    If dictOrderW Is Nothing Then Exit Function
+    If dictOrderW.Exists(CStr(firstOrderKey)) Then
+        If dictOrderW(CStr(firstOrderKey)).Exists(CStr(workerId)) Then
+            GetBrigadeWorkerName = NormalizeInlineSpaces(CStr(dictOrderW(CStr(firstOrderKey))(CStr(workerId))))
+        End If
+    End If
+End Function
+
+' ===========================================================================
+' BuildBrigadeMemberCaption
+' ===========================================================================
+' Назначение:
+'   Строит текстовое представление одного участника бригады.
+'   Функция умеет возвращать как полную форму "ФИО (табельный)", так и
+'   укороченный вариант для списка выбора.
+' Основные действия:
+'   - Получает имя сотрудника по табельному номеру.
+'   - При необходимости сокращает имя до фамилии с инициалами.
+'   - Добавляет или скрывает табельный номер в зависимости от режима.
+' Параметры:
+'   firstOrderKey - заказ, по которому определяется состав.
+'   workerId - табельный номер сотрудника.
+'   dictOrderW - словарь order -> workerId -> workerName.
+'   useShortName - признак использования сокращённого имени.
+'   includeId - признак добавления табельного номера в подпись.
+' Возвращаемое значение:
+'   Строка-подпись сотрудника.
+Private Function BuildBrigadeMemberCaption(ByVal firstOrderKey As String, ByVal workerId As String, ByVal dictOrderW As Object, ByVal useShortName As Boolean, ByVal includeId As Boolean) As String
+    Dim workerName As String
+    workerName = GetBrigadeWorkerName(firstOrderKey, workerId, dictOrderW)
+    If useShortName Then workerName = AbbreviatePersonName(workerName)
+    workerId = Trim$(workerId)
+    If includeId Then
+        If workerName <> "" And workerId <> "" Then
+            BuildBrigadeMemberCaption = workerName & " (" & workerId & ")"
+        ElseIf workerName <> "" Then
+            BuildBrigadeMemberCaption = workerName
+        ElseIf workerId <> "" Then
+            BuildBrigadeMemberCaption = "(" & workerId & ")"
+        End If
+    Else
+        If workerName <> "" Then
+            BuildBrigadeMemberCaption = workerName
+        Else
+            BuildBrigadeMemberCaption = workerId
+        End If
+    End If
+End Function
+
+' ===========================================================================
+' BuildBrigadeName
+' ===========================================================================
+' Назначение:
+'   Собирает полный текст состава бригады из всех сотрудников.
+'   Эта строка используется в итоговом выводе на лист MRS без сокращений.
+' Основные действия:
+'   - Обходит всех сотрудников в brigade key.
+'   - Формирует подпись каждого участника в полном формате.
+'   - Склеивает подписи через запятую.
+' Параметры:
+'   workerIds - массив табельных номеров выбранной бригады.
+'   firstOrderKey - заказ-эталон для получения имён.
+'   dictOrderW - словарь order -> workerId -> workerName.
+' Возвращаемое значение:
+'   Полная строка состава бригады.
+Private Function BuildBrigadeName(ByVal workerIds As Variant, ByVal firstOrderKey As String, ByVal dictOrderW As Object) As String
+    Dim i As Long
+    Dim itemText As String
+    For i = LBound(workerIds) To UBound(workerIds)
+        itemText = BuildBrigadeMemberCaption(firstOrderKey, CStr(workerIds(i)), dictOrderW, False, True)
+        If BuildBrigadeName <> "" Then BuildBrigadeName = BuildBrigadeName & ", "
+        BuildBrigadeName = BuildBrigadeName & itemText
+    Next i
+End Function
+
+' ===========================================================================
+' BuildLimitedBrigadeListLabel
+' ===========================================================================
+' Назначение:
+'   Собирает сокращённый label бригады, гарантированно помещающийся в список
+'   выбора Excel-диалога.
+'   Используется только для отображения в ListBox и не меняет полный заголовок
+'   бригады на листе MRS.
+' Основные действия:
+'   - Добавляет в строку участников по одному.
+'   - Перед каждым шагом оценивает, помещается ли следующий элемент вместе
+'     с хвостом вида "+N чел." в безопасный лимит.
+'   - Если очередной участник уже не помещается, завершает строку хвостом
+'     с количеством скрытых участников.
+' Параметры:
+'   workerIds - массив табельных номеров бригады.
+'   firstOrderKey - заказ-эталон для получения имён.
+'   dictOrderW - словарь order -> workerId -> workerName.
+'   useShortName - использовать ли сокращённые имена.
+'   includeId - включать ли табельный номер в label.
+' Возвращаемое значение:
+'   Укороченный label бригады, безопасный для AddItem.
+Private Function BuildLimitedBrigadeListLabel(ByVal workerIds As Variant, ByVal firstOrderKey As String, ByVal dictOrderW As Object, ByVal useShortName As Boolean, ByVal includeId As Boolean) As String
+    Dim workerCount As Long
+    Dim prefix As String
+    Dim fallbackText As String
+    Dim i As Long
+    Dim shownCount As Long
+    Dim hiddenCount As Long
+    Dim itemText As String
+    Dim candidate As String
+    Dim tailText As String
+    workerCount = UBound(workerIds) - LBound(workerIds) + 1
+    fallbackText = CStr(workerCount) & " " & UW(1095, 1077, 1083, 46)
+    prefix = fallbackText & ": "
+    BuildLimitedBrigadeListLabel = prefix
+    For i = LBound(workerIds) To UBound(workerIds)
+        itemText = BuildBrigadeMemberCaption(firstOrderKey, CStr(workerIds(i)), dictOrderW, useShortName, includeId)
+        If itemText = "" Then itemText = CStr(workerIds(i))
+        If shownCount > 0 Then
+            candidate = BuildLimitedBrigadeListLabel & ", " & itemText
+        Else
+            candidate = BuildLimitedBrigadeListLabel & itemText
+        End If
+        hiddenCount = UBound(workerIds) - i
+        If hiddenCount > 0 Then tailText = " +" & CStr(hiddenCount) & " " & UW(1095, 1077, 1083, 46) Else tailText = ""
+        If Len(candidate & tailText) > MAX_DIALOG_LIST_ITEM_LEN Then Exit For
+        BuildLimitedBrigadeListLabel = candidate
+        shownCount = shownCount + 1
+    Next i
+    If shownCount = 0 Then
+        BuildLimitedBrigadeListLabel = fallbackText
+    ElseIf shownCount < workerCount Then
+        BuildLimitedBrigadeListLabel = BuildLimitedBrigadeListLabel & " +" & CStr(workerCount - shownCount) & " " & UW(1095, 1077, 1083, 46)
+    End If
+End Function
+
+' ===========================================================================
+' BuildBrigadeListLabel
+' ===========================================================================
+' Назначение:
+'   Выбирает итоговый отображаемый label бригады для ListBox.
+'   Сначала пытается использовать полную строку, а если она слишком длинная,
+'   последовательно переключается на более компактные формы.
+' Основные действия:
+'   - Проверяет, помещается ли полный состав в безопасный лимит.
+'   - Если нет, строит сокращённый label с фамилиями и инициалами.
+'   - При необходимости убирает табельные номера из сокращённой формы.
+' Параметры:
+'   workerIds - массив табельных номеров бригады.
+'   firstOrderKey - заказ-эталон для получения имён.
+'   dictOrderW - словарь order -> workerId -> workerName.
+' Возвращаемое значение:
+'   Строка, предназначенная для DialogSheet.ListBox.AddItem.
+Private Function BuildBrigadeListLabel(ByVal workerIds As Variant, ByVal firstOrderKey As String, ByVal dictOrderW As Object) As String
+    Dim fullName As String
+    fullName = BuildBrigadeName(workerIds, firstOrderKey, dictOrderW)
+    If Len(fullName) <= MAX_DIALOG_LIST_ITEM_LEN Then
+        BuildBrigadeListLabel = fullName
+        Exit Function
+    End If
+    BuildBrigadeListLabel = BuildLimitedBrigadeListLabel(workerIds, firstOrderKey, dictOrderW, True, True)
+    If Len(BuildBrigadeListLabel) <= MAX_DIALOG_LIST_ITEM_LEN Then Exit Function
+    BuildBrigadeListLabel = BuildLimitedBrigadeListLabel(workerIds, firstOrderKey, dictOrderW, True, False)
+End Function
+
+' ===========================================================================
 ' LoadMRS
 ' ===========================================================================
 ' Назначение:
@@ -4181,6 +4427,8 @@ SkipDateRow:
     ' пользователь может импортировать только нужные составы.
     Dim brigNames() As String
     ReDim brigNames(1 To brigCount)
+    Dim brigListNames() As String
+    ReDim brigListNames(1 To brigCount)
     Dim selBrig() As Boolean
     ReDim selBrig(1 To brigCount)
     
@@ -4192,17 +4440,8 @@ SkipDateRow:
         tmpWorkerIds = Split(tmpBrigKey, ",")
         Dim tmpFirstOrd As Variant
         For Each tmpFirstOrd In dictBrigades(tmpBrigKey).Keys: Exit For: Next
-        Dim tmpWStr As String: tmpWStr = ""
-        Dim twi As Long
-        For twi = 0 To UBound(tmpWorkerIds)
-            If twi > 0 Then tmpWStr = tmpWStr & ", "
-            Dim tmpWName As String: tmpWName = ""
-            If dictOrderW(CStr(tmpFirstOrd)).Exists(CStr(tmpWorkerIds(twi))) Then
-                tmpWName = dictOrderW(CStr(tmpFirstOrd))(CStr(tmpWorkerIds(twi)))
-            End If
-            tmpWStr = tmpWStr & tmpWName & " (" & tmpWorkerIds(twi) & ")"
-        Next twi
-        brigNames(bDisp) = tmpWStr
+        brigNames(bDisp) = BuildBrigadeName(tmpWorkerIds, CStr(tmpFirstOrd), dictOrderW)
+        brigListNames(bDisp) = BuildBrigadeListLabel(tmpWorkerIds, CStr(tmpFirstOrd), dictOrderW)
     Next bDisp
     
     If brigCount = 1 Then
@@ -4242,7 +4481,7 @@ SkipDateRow:
         btnClearAll.OnAction = "ClearAllBrigades"
         
         For bDisp = 1 To brigCount
-            lb.AddItem brigNames(bDisp)
+            lb.AddItem brigListNames(bDisp)
         Next bDisp
         
         Application.ScreenUpdating = True
@@ -4304,7 +4543,7 @@ SkipDateRow:
         wsMRS.Cells(outRow, 2).HorizontalAlignment = -4108
         wsMRS.Cells(outRow, 2).Interior.Color = clrMrsSub
         wsMRS.Cells(outRow, 2).WrapText = True
-        wsMRS.Rows(outRow).RowHeight = 60
+        wsMRS.Rows(outRow).RowHeight = 120
 
         Dim ordInBrig As Long
         ordInBrig = dictBrigades(curBrigKey).Count

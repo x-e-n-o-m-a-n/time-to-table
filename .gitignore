@@ -23,6 +23,10 @@ Thumbs.db
 *.swo
 TimeToTable_VBA.xlsm
 export.xlsx
+EXPORT(Валидно).XLSX
+EXPORT1(Валидно).XLSX
+EXPORT2(НЕ Валидно).XLSX
+EXPORT3(НЕ Валидно).XLSX
 История_Расчетов_20-03-2026.xlsx
 tools/modTimeToTable_manual.bas
 tools/ThisWorkbook_manual.bas
